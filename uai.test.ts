@@ -111,6 +111,7 @@ test('UAI Library - Comprehensive Integration Test', async () => {
 
   // Test the schema structure without making API calls
   expect(complexAgent).toBeDefined();
+  console.log("complexAgent", complexAgent)
   console.log('✅ Complex schema validation passed');
 
   // Test 4: MCP server configuration

@@ -1,8 +1,10 @@
 {
-  "name": "uaiv2",
-  "module": "index.ts",
+  "name": "@ments/ai",
+  "module": "uai.ts",
+  "main": "./uai.ts",
+  "version": "1.0.2",
   "type": "module",
-  "private": true,
+  "private": false,
   "devDependencies": {
     "@types/bun": "latest"
   },
