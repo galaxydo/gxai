@@ -44,12 +44,19 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
 
 // ### Progress Callback Types
 export interface ProgressUpdate {
-  stage: "server_selection" | "tool_discovery" | "tool_invocation" | "response_generation";
+  stage: "server_selection" | "tool_discovery" | "tool_invocation" | "response_generation" | "streaming";
   message: string;
   data?: any;
 }
+export interface StreamingUpdate {
+  stage: "streaming";
+  field: string;
+  value: string;
+}
+
 
 export type ProgressCallback = (update: ProgressUpdate) => void;
+export type StreamingCallback = (update: StreamingUpdate) => void;
 
 // ### XML Utilities
 /** Converts an object to an XML string. */
@@ -125,7 +132,8 @@ async function callLLM(
   llm: LLMType,
   messages: Array<{ role: string; content: string }>,
   options: { temperature?: number; maxTokens?: number } = {},
-  measureFn?: typeof measure
+  measureFn?: typeof measure,
+  streamingCallback?: StreamingCallback
 ): Promise<string> {
   const executeCall = async (measure: typeof measure) => {
     const { temperature = 0.7, maxTokens = 4000 } = options;
@@ -138,34 +146,142 @@ async function callLLM(
       headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
       headers["anthropic-version"] = "2023-06-01";
       url = "https://api.anthropic.com/v1/messages";
-      body = { model: llm, max_tokens: maxTokens, messages };
+      body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
     } else if (llm.includes("deepseek")) {
       headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
       url = "https://api.deepseek.com/v1/chat/completions";
-      body = { model: llm, temperature, messages, max_tokens: maxTokens };
+      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
     } else {
       headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
       url = "https://api.openai.com/v1/chat/completions";
-      body = { model: llm, temperature, messages, max_tokens: maxTokens };
+      if (llm.includes('o4-')) {
+        body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
+      } else {
+        body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+      }
     }
+
     const requestBodyStr = JSON.stringify(body);
-    const response = await measure(
-      async () => {
-        const res = await fetch(url, {
-          method: "POST",
-          headers,
-          body: requestBodyStr,
-        });
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(`LLM API error: ${errorText}`);
+
+    if (!streamingCallback) {
+      const response = await measure(
+        async () => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: requestBodyStr,
+          });
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`LLM API error: ${errorText}`);
+          }
+          return res;
+        },
+        `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
+      );
+      const data = await response.json();
+      return llm.includes("claude") ? data.content[0].text : data.choices[0].message.content;
+    } else {
+      // Streaming response handling
+      const response = await measure(
+        async () => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: requestBodyStr,
+          });
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`LLM API error: ${errorText}`);
+          }
+          return res;
+        },
+        `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`
+      );
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No readable stream available");
+      }
+
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+      let currentField = "";
+      let currentValue = "";
+      let insideTag = false;
+      let buffer = "";
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          // Process complete lines for different providers
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            let content = '';
+
+            if (llm.includes("claude")) {
+              // Anthropic streaming format
+              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === 'content_block_delta' && data.delta?.text) {
+                    content = data.delta.text;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            } else {
+              // OpenAI/DeepSeek streaming format
+              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.choices?.[0]?.delta?.content) {
+                    content = data.choices[0].delta.content;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            }
+
+            if (content) {
+              fullResponse += content;
+
+              // Parse XML tags to detect field changes
+              for (const char of content) {
+                if (char === '<') {
+                  insideTag = true;
+                  currentValue = "";
+                } else if (char === '>' && insideTag) {
+                  insideTag = false;
+                  if (!currentValue.startsWith('/')) {
+                    currentField = currentValue;
+                    currentValue = "";
+                  }
+                } else if (insideTag) {
+                  currentValue += char;
+                } else if (currentField && char !== '\n') {
+                  currentValue += char;
+                  streamingCallback({ stage: "streaming", field: currentField, value: currentValue });
+                }
+              }
+            }
+          }
         }
-        return res;
-      },
-      `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
-    );
-    const data = await response.json();
-    return llm.includes("claude") ? data.content[0].text : data.choices[0].message.content;
+      } finally {
+        reader.releaseLock();
+      }
+
+      return fullResponse;
+    }
   };
   return measureFn
     ? await measureFn(executeCall, `LLM call to ${llm}`)
@@ -308,9 +424,10 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           stage: "response_generation",
           message: "Generating final response...",
         });
+
         try {
           const response = await measure(
-            async (measure) => await this.generateResponse(validatedInput, toolResults, measure),
+            async (measure) => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
             "Generate AI response with toolResults: " + JSON.stringify(toolResults),
           );
           return await measure(
@@ -445,7 +562,16 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   }
 
   /** Generates the final response based on input and tool results. */
-  private async generateResponse(input: any, toolResults: Record<string, any>, measureFn: typeof measure): Promise<any> {
+  private async generateResponse(
+    input: any,
+    toolResults: Record<string, any>,
+    measureFn: typeof measure,
+    progressCallback?: ProgressCallback
+  ): Promise<any> {
+    const streamingCallback: StreamingCallback | undefined = progressCallback ?
+      (update) => progressCallback(update as ProgressUpdate) :
+      undefined;
+
     return await measureFn(
       async (measure) => {
         const systemPrompt = this.config.systemPrompt || null;
@@ -472,7 +598,8 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           this.config.llm,
           messages,
           { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000 },
-          measure
+          measure,
+          streamingCallback
         ), userPrompt);
         const parsed = await measure(
           async () => xmlToObj(response),
