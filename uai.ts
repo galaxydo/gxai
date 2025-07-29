@@ -432,7 +432,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           );
           return await measure(
             async () => this.config.outputFormat.parse(response),
-            "Validate output schema of response: " + JSON.stringify(response),
+            "Validate output schema of response fields: " + Object.keys(response),
           );
         } catch (validationError) {
           console.error("validationError", validationError);
@@ -565,67 +565,61 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   private async generateResponse(
     input: any,
     toolResults: Record<string, any>,
-    measureFn: typeof measure,
+    measure: typeof measure,
     progressCallback?: ProgressCallback
   ): Promise<any> {
     const streamingCallback: StreamingCallback | undefined = progressCallback ?
       (update) => progressCallback(update as ProgressUpdate) :
       undefined;
 
-    return await measureFn(
-      async (measure) => {
-        const systemPrompt = this.config.systemPrompt || null;
-        const obj = {
-          input,
-          output_format: this.getOutputFormatDescription(),
-          task: this.generateTaskDescription(),
-        };
+    const systemPrompt = this.config.systemPrompt || null;
+    const obj = {
+      input,
+      output_format: this.getOutputFormatDescription(),
+      task: this.generateTaskDescription(),
+    };
 
-        // Only add context if toolResults has actual content
-        const hasToolResults = toolResults && Object.keys(toolResults).length > 0 &&
-          Object.values(toolResults).some(result =>
-            result !== null && result !== undefined && result !== '' && JSON.stringify(result) !== '{}');
-        if (hasToolResults) {
-          obj.context = { tool_results: toolResults };
-        }
-        const userPrompt = objToXml(obj);
-        const messages = [];
-        if (systemPrompt) {
-          messages.push({ role: "system", content: systemPrompt })
-        }
-        messages.push({ role: "user", content: `<request>${userPrompt}</request>` });
-        const response = await measure(() => callLLM(
-          this.config.llm,
-          messages,
-          { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000 },
-          measure,
-          streamingCallback
-        ), userPrompt);
-        const parsed = await measure(
-          async () => xmlToObj(response),
-          "Parse LLM response XML: " + response,
-        );
-        return await measure(
-          async () => {
-            const shape = this.config.outputFormat.shape;
-            const result: any = {};
-            for (const [key, schema] of Object.entries(shape)) {
-              if (parsed[key] !== undefined) {
-                result[key] = parsed[key];
-              } else if (parsed[Object.keys(parsed)[0]] && typeof parsed[Object.keys(parsed)[0]] === "object") {
-                const firstKey = Object.keys(parsed)[0];
-                const nestedObj = parsed[firstKey];
-                if (nestedObj[key] !== undefined) result[key] = nestedObj[key];
-              }
-            }
-            return result;
-          },
-          "Build structured response object from parsed: " + JSON.stringify(parsed)
-        );
-      },
-      "Generate AI response"
+    const hasToolResults = toolResults && Object.keys(toolResults).length > 0 &&
+      Object.values(toolResults).some(result =>
+        result !== null && result !== undefined && result !== '' && JSON.stringify(result) !== '{}');
+    if (hasToolResults) {
+      obj.context = { tool_results: toolResults };
+    }
+    const userPrompt = objToXml(obj);
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt })
+    }
+    messages.push({ role: "user", content: `<request>${userPrompt}</request>` });
+
+    const response = await measure(() => callLLM(
+      this.config.llm,
+      messages,
+      { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000 },
+      measure,
+      streamingCallback
+    ), `Executing Prompt: ${userPrompt}`);
+
+    const parsed = await measure(
+      async () => xmlToObj(response),
+      "Parsing Response: " + response,
     );
+
+    const shape = this.config.outputFormat.shape;
+    const result: any = {};
+    for (const [key, schema] of Object.entries(shape)) {
+      if (parsed[key] !== undefined) {
+        result[key] = parsed[key];
+      } else if (parsed[Object.keys(parsed)[0]] && typeof parsed[Object.keys(parsed)[0]] === "object") {
+        const firstKey = Object.keys(parsed)[0];
+        const nestedObj = parsed[firstKey];
+        if (nestedObj[key] !== undefined) result[key] = nestedObj[key];
+      }
+    }
+
+    return result;
   }
+
   /** Validates that the output schema contains no arrays. */
   private validateNoArrays(schema: z.ZodObject<any>, path: string = ''): void {
     const shape = schema.shape;
