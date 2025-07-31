@@ -210,7 +210,6 @@ async function callLLM(
         throw new Error(`LLM streaming API call to ${llm} failed. The network request did not return a response.`);
       }
 
-
       const reader = response.body?.getReader();
       if (!reader) {
         throw new Error("No readable stream available");
@@ -218,156 +217,93 @@ async function callLLM(
 
       const decoder = new TextDecoder();
       let fullResponse = "";
-      let currentField = "";
-      let currentValue = "";
+      let buffer = "";
+      let tagStack: string[] = [];
+      let currentTagName = "";
       let wordBuffer = "";
       let insideTag = false;
-      let buffer = "";
+
+      const parseSseLine = (line: string): string => {
+        if (!line.startsWith("data: ") || line.includes("[DONE]")) {
+          return "";
+        }
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (llm.includes("claude")) {
+            return data.type === "content_block_delta" && data.delta?.text ? data.delta.text : "";
+          } else {
+            return data.choices?.[0]?.delta?.content || "";
+          }
+        } catch (e) {
+          return "";
+        }
+      };
+
+      const processChunk = (chunk: string) => {
+        fullResponse += chunk;
+
+        for (const char of chunk) {
+          if (char === "<") {
+            if (wordBuffer && tagStack.length > 0) {
+              streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
+            }
+            wordBuffer = "";
+            insideTag = true;
+            currentTagName = "";
+          } else if (char === ">" && insideTag) {
+            insideTag = false;
+            if (currentTagName.startsWith("/")) {
+              tagStack.pop();
+            } else if (currentTagName.trim()) {
+              tagStack.push(currentTagName.trim());
+            }
+            currentTagName = "";
+            wordBuffer = "";
+          } else if (insideTag) {
+            currentTagName += char;
+          } else if (tagStack.length > 0) {
+            const currentField = tagStack.join("_");
+            if (char === " " || char === "\n") {
+              if (wordBuffer) {
+                streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+              }
+              streamingCallback({ stage: "streaming", field: currentField, value: char });
+              wordBuffer = "";
+            } else {
+              wordBuffer += char;
+            }
+          }
+        }
+      };
 
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
 
-          // Process complete lines for different providers
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            let content = '';
-
-            if (llm.includes("claude")) {
-              // Anthropic streaming format
-              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.type === 'content_block_delta' && data.delta?.text) {
-                    content = data.delta.text;
-                  }
-                } catch (e) {
-                  continue;
-                }
-              }
-            } else {
-              // OpenAI/DeepSeek streaming format
-              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.choices?.[0]?.delta?.content) {
-                    content = data.choices[0].delta.content;
-                  }
-                } catch (e) {
-                  continue;
-                }
-              }
-            }
-
-            if (content && content.length > 0) {
-              fullResponse += content;
-
-              // Parse XML tags to detect field changes
-              for (const char of content) {
-                if (char === '<') {
-                  if (wordBuffer !== '' && currentField) {
-                    streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
-                  }
-                  wordBuffer = "";
-                  insideTag = true;
-                  currentValue = "";
-                } else if (char === '>' && insideTag) {
-                  insideTag = false;
-                  if (!currentValue.startsWith('/')) {
-                    currentField = currentValue;
-                  }
-                  currentValue = "";
-                  wordBuffer = "";
-                } else if (insideTag) {
-                  currentValue += char;
-                } else if (currentField) {
-                  if (char === ' ' || char === '\n') {
-                    if (wordBuffer !== '') {
-                      streamingCallback({ stage: "streaming", field: currentField, value: `${wordBuffer}${char}` });
-                    }
-                    wordBuffer = "";
-                  } else {
-                    wordBuffer += char;
-                  }
-                }
-              }
-            }
+          for (const line of lines) {
+            const content = parseSseLine(line);
+            if (content) {
+              processChunk(content);
+            }
           }
         }
       } finally {
         reader.releaseLock();
         // Process any remaining buffer after the loop
-        if (buffer && buffer.length > 0) {
-          let content = '';
-
-          if (llm.includes("claude")) {
-            // Anthropic streaming format
-            if (buffer.startsWith('data: ') && !buffer.includes('[DONE]')) {
-              try {
-                const data = JSON.parse(buffer.slice(6));
-                if (data.type === 'content_block_delta' && data.delta?.text) {
-                  content = data.delta.text;
-                }
-              } catch (e) {
-                // Skip invalid JSON
-              }
-            }
-          } else {
-            // OpenAI/DeepSeek streaming format
-            if (buffer.startsWith('data: ') && !buffer.includes('[DONE]')) {
-              try {
-                const data = JSON.parse(buffer.slice(6));
-                if (data.choices?.[0]?.delta?.content) {
-                  content = data.choices[0].delta.content;
-                }
-              } catch (e) {
-                // Skip invalid JSON
-              }
-            }
-          }
-
-          if (content && content.length > 0) {
-            fullResponse += content;
-            for (const char of content) {
-              if (char === '<') {
-                if (wordBuffer !== '' && currentField) {
-                  streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
-                }
-                wordBuffer = "";
-                insideTag = true;
-                currentValue = "";
-              } else if (char === '>' && insideTag) {
-                insideTag = false;
-                if (!currentValue.startsWith('/')) {
-                  currentField = currentValue;
-                }
-                currentValue = "";
-                wordBuffer = "";
-              } else if (insideTag) {
-                currentValue += char;
-              } else if (currentField) {
-                if (char === ' ' || char === '\n') {
-                  if (wordBuffer !== '') {
-                    streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
-                  }
-                  streamingCallback({ stage: "streaming", field: currentField, value: char });
-                  wordBuffer = "";
-                } else {
-                  wordBuffer += char;
-                }
-              }
-            }
+        if (buffer) {
+          const content = parseSseLine(buffer);
+          if (content) {
+            processChunk(content);
           }
         }
         // Send any pending word buffer at the end
-        if (wordBuffer !== '') {
-          streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+        if (wordBuffer && tagStack.length > 0 && streamingCallback) {
+          streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
         }
       }
 
