@@ -17,6 +17,8 @@ describe('UAI Library Advanced Tests', () => {
       outputFormat: z.object({
         thinkingProcess: z.string().describe("My step-by-step reasoning for crafting the response, from the persona's point of view."),
         finalResponse: z.string().describe("The final, crafted response for the user, delivered in character."),
+        suggestedMarkup: z.string().describe("A sample HTML block based on the response, which could be e.g. a div or a blockquote."),
+        status: z.boolean().describe("is it done or not"),
       }),
       temperature: 0.7,
     });
@@ -28,9 +30,12 @@ describe('UAI Library Advanced Tests', () => {
     };
 
     try {
+      const streamingResponse = {};
       // 2. Run the agent and await the structured result
-      const { finalResponse, thinkingProcess } = await personaAgent.run(input, (update) => {
-        console.log("update", update)
+      const { finalResponse, thinkingProcess, suggestedMarkup, status } = await personaAgent.run(input, (update: any) => {
+        if (update.stage === 'streaming') {
+          streamingResponse[update.field] = (streamingResponse[update.field] || '') + update.value;
+        }
       });
 
       // 3. Log the output for easy debugging during test runs
@@ -38,14 +43,25 @@ describe('UAI Library Advanced Tests', () => {
       console.log(thinkingProcess);
       console.log('\n--- Final Response ---');
       console.log(finalResponse);
+      console.log('\n--- Suggested Markup ---');
+      console.log(suggestedMarkup);
+      console.log('\n--- Status ---');
+      console.log(status);
+
+      // check boolean type prompts
+      expect(status).toBe(true);
 
       // 4. Verify the structure and content of the response
       expect(thinkingProcess).toBeTypeOf('string');
       expect(thinkingProcess.length).toBeGreaterThan(1); // Assert it's not empty
 
       expect(finalResponse).toBeTypeOf('string');
-      // Check for persona-specific keywords to confirm the prompt was followed
       expect(finalResponse.toLowerCase()).toInclude('sea');
+      expect(suggestedMarkup).toBeTypeOf('string');
+      // Assert that we received a string that contains markup, which would have failed before the fix.
+      expect(suggestedMarkup.trim()).toStartWith('<');
+      expect(suggestedMarkup.trim()).toEndWith('>');
+
 
       console.log('\n✅ Agent generated a valid, structured response that fits the persona.');
 

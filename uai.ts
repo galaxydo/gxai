@@ -658,19 +658,30 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       return {};
     }
 
-
     const shape = this.config.outputFormat.shape;
     const result: any = {};
+
+    // Determine the main object to extract fields from, handling a potential single root element in the XML response.
+    const rootKey = Object.keys(parsed)[0];
+    const sourceObject = (rootKey && typeof parsed[rootKey] === 'object' && Object.keys(parsed).length === 1) ? parsed[rootKey] : parsed;
+
     for (const [key, schema] of Object.entries(shape)) {
-      if (parsed[key] !== undefined) {
-        result[key] = parsed[key];
-      } else if (parsed[Object.keys(parsed)[0]] && typeof parsed[Object.keys(parsed)[0]] === "object") {
-        const firstKey = Object.keys(parsed)[0];
-        const nestedObj = parsed[firstKey];
-        if (nestedObj[key] !== undefined) result[key] = nestedObj[key];
+      if (sourceObject[key] !== undefined) {
+        let value = sourceObject[key];
+        const typeName = this.getSchemaTypeName(schema as z.ZodType<any>);
+
+        // If the schema expects a string but the parser returned an object, it's likely an unescaped markup string.
+        if (typeName === 'ZodString' && typeof value === 'object' && value !== null) {
+          // Re-extract the raw inner content for this field from the original XML response string.
+          const fieldRegex = new RegExp(`<${key}>([\\s\\S]*?)</${key}>`, 's');
+          const match = response.match(fieldRegex);
+          if (match && typeof match[1] === 'string') {
+            value = match[1];
+          }
+        }
+        result[key] = value;
       }
     }
-
     return result;
   }
 
@@ -704,7 +715,6 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     }
     return schema._def.typeName;
   }
-
   /** Returns the output format structure for use in prompts. */
   private getOutputFormatDescription(): any {
     const shape = this.config.outputFormat.shape;
@@ -784,18 +794,23 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         }
       }
 
-      // Handle enum types specifically
-      if (currentSchema._def.typeName === 'ZodEnum') {
+      // Handle constrained types like booleans and enums to provide clear instructions to the LLM
+      let constraint: string | null = null;
+      if (currentSchema._def.typeName === 'ZodBoolean') {
+        constraint = 'either "true" or "false"';
+      } else if (currentSchema._def.typeName === 'ZodEnum') {
         const enumSchema = currentSchema as z.ZodEnum<any>;
         const allowedValues = enumSchema._def.values;
-        const enumConstraint = `exactly one of these values: ${allowedValues.map(v => `"${v}"`).join(', ')}`;
-
-        if (description) {
-          description += `. Must be ${enumConstraint}`;
-        } else {
-          description = `Must be ${enumConstraint}`;
-        }
+        constraint = `exactly one of these values: ${allowedValues.map(v => `"${v}"`).join(', ')}`;
       }
+
+      if (constraint) {
+        if (description) {
+          description += `. Must be ${constraint}`;
+        } else {
+          description = `Must be ${constraint}`;
+        }
+        }
 
       if (description) {
         descriptions.push(`- ${currentPath} SHOULD be ${description}`);
