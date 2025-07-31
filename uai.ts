@@ -127,167 +127,244 @@ function xmlToObj(xmlContent: string): any {
 }
 
 // ### LLM API Calls
-/** Calls an LLM API with measurement for logging. */
 async function callLLM(
-  llm: LLMType,
-  messages: Array<{ role: string; content: string }>,
-  options: { temperature?: number; maxTokens?: number } = {},
-  measureFn?: typeof measure,
-  streamingCallback?: StreamingCallback
+  llm: LLMType,
+  messages: Array<{ role: string; content: string }>,
+  options: { temperature?: number; maxTokens?: number } = {},
+  measureFn?: typeof measure,
+  streamingCallback?: StreamingCallback
 ): Promise<string> {
-  const executeCall = async (measure: typeof measure) => {
-    const { temperature = 0.7, maxTokens = 4000 } = options;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    let url = "";
-    let body: Record<string, any> = {};
-    if (llm.includes("claude")) {
-      headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
-      headers["anthropic-version"] = "2023-06-01";
-      url = "https://api.anthropic.com/v1/messages";
-      body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
-    } else if (llm.includes("deepseek")) {
-      headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
-      url = "https://api.deepseek.com/v1/chat/completions";
-      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
-    } else {
-      headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
-      url = "https://api.openai.com/v1/chat/completions";
-      if (llm.includes('o4-')) {
-        body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
-      } else {
-        body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
-      }
-    }
+  const executeCall = async (measure: typeof measure) => {
+    const { temperature = 0.7, maxTokens = 4000 } = options;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    let url = "";
+    let body: Record<string, any> = {};
+    if (llm.includes("claude")) {
+      headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
+      headers["anthropic-version"] = "2023-06-01";
+      url = "https://api.anthropic.com/v1/messages";
+      body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
+    } else if (llm.includes("deepseek")) {
+      headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
+      url = "https://api.deepseek.com/v1/chat/completions";
+      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+    } else {
+      headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
+      url = "https://api.openai.com/v1/chat/completions";
+      if (llm.includes('o4-')) {
+        body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
+      } else {
+        body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+      }
+    }
 
-    const requestBodyStr = JSON.stringify(body);
+    const requestBodyStr = JSON.stringify(body);
 
-    if (!streamingCallback) {
-      const response = await measure(
-        async () => {
-          const res = await fetch(url, {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          });
-          if (!res.ok) {
-            const errorText = await res.text();
-            throw new Error(`LLM API error: ${errorText}`);
-          }
-          return res;
-        },
-        `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
-      );
-      const data = await response.json();
-      return llm.includes("claude") ? data.content[0].text : data.choices[0].message.content;
-    } else {
-      // Streaming response handling
-      const response = await measure(
-        async () => {
-          const res = await fetch(url, {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          });
-          if (!res.ok) {
-            const errorText = await res.text();
-            throw new Error(`LLM API error: ${errorText}`);
-          }
-          return res;
-        },
-        `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`
-      );
+    if (!streamingCallback) {
+      const response = await measure(
+        async () => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: requestBodyStr,
+          });
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`LLM API error: ${errorText}`);
+          }
+          return res;
+        },
+        `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
+      );
+      const data = await response.json();
+      return llm.includes("claude") ? data.content[0].text : data.choices[0].message.content;
+    } else {
+      // Streaming response handling
+      const response = await measure(
+        async () => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: requestBodyStr,
+          });
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`LLM API error: ${errorText}`);
+          }
+          return res;
+        },
+        `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`
+      );
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("No readable stream available");
-      }
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No readable stream available");
+      }
 
-      const decoder = new TextDecoder();
-      let fullResponse = "";
-      let currentField = "";
-      let currentValue = "";
-      let insideTag = false;
-      let buffer = "";
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+      let currentField = "";
+      let currentValue = "";
+      let wordBuffer = "";
+      let insideTag = false;
+      let buffer = "";
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
 
-          // Process complete lines for different providers
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+          // Process complete lines for different providers
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
-          for (const line of lines) {
-            let content = '';
+          for (const line of lines) {
+            let content = '';
 
-            if (llm.includes("claude")) {
-              // Anthropic streaming format
-              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.type === 'content_block_delta' && data.delta?.text) {
-                    content = data.delta.text;
-                  }
-                } catch (e) {
-                  continue;
-                }
-              }
-            } else {
-              // OpenAI/DeepSeek streaming format
-              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.choices?.[0]?.delta?.content) {
-                    content = data.choices[0].delta.content;
-                  }
-                } catch (e) {
-                  continue;
-                }
-              }
-            }
+            if (llm.includes("claude")) {
+              // Anthropic streaming format
+              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === 'content_block_delta' && data.delta?.text) {
+                    content = data.delta.text;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            } else {
+              // OpenAI/DeepSeek streaming format
+              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.choices?.[0]?.delta?.content) {
+                    content = data.choices[0].delta.content;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            }
 
-            if (content) {
-              fullResponse += content;
+            if (content && content.length > 0) {
+              fullResponse += content;
 
-              // Parse XML tags to detect field changes
-              for (const char of content) {
-                if (char === '<') {
-                  insideTag = true;
-                  currentValue = "";
-                } else if (char === '>' && insideTag) {
-                  insideTag = false;
-                  if (!currentValue.startsWith('/')) {
-                    currentField = currentValue;
-                    currentValue = "";
-                  }
-                } else if (insideTag) {
-                  currentValue += char;
-                } else if (currentField && char !== '\n') {
-                  currentValue += char;
-                  streamingCallback({ stage: "streaming", field: currentField, value: currentValue });
-                }
-              }
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
+              // Parse XML tags to detect field changes
+              for (const char of content) {
+                if (char === '<') {
+                  if (wordBuffer !== '' && currentField) {
+                    streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+                  }
+                  wordBuffer = "";
+                  insideTag = true;
+                  currentValue = "";
+                } else if (char === '>' && insideTag) {
+                  insideTag = false;
+                  if (!currentValue.startsWith('/')) {
+                    currentField = currentValue;
+                  }
+                  currentValue = "";
+                  wordBuffer = "";
+                } else if (insideTag) {
+                  currentValue += char;
+                } else if (currentField) {
+                  if (char === ' ' || char === '\n') {
+                    if (wordBuffer !== '') {
+                      streamingCallback({ stage: "streaming", field: currentField, value: `${wordBuffer}${char}` });
+                    }
+                    wordBuffer = "";
+                  } else {
+                    wordBuffer += char;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+        // Process any remaining buffer after the loop
+        if (buffer && buffer.length > 0) {
+          let content = '';
 
-      return fullResponse;
-    }
-  };
-  return measureFn
-    ? await measureFn(executeCall, `LLM call to ${llm}`)
-    : await measure(executeCall, `LLM call to ${llm}`);
+          if (llm.includes("claude")) {
+            // Anthropic streaming format
+            if (buffer.startsWith('data: ') && !buffer.includes('[DONE]')) {
+              try {
+                const data = JSON.parse(buffer.slice(6));
+                if (data.type === 'content_block_delta' && data.delta?.text) {
+                  content = data.delta.text;
+                }
+              } catch (e) {
+                // Skip invalid JSON
+              }
+            }
+          } else {
+            // OpenAI/DeepSeek streaming format
+            if (buffer.startsWith('data: ') && !buffer.includes('[DONE]')) {
+              try {
+                const data = JSON.parse(buffer.slice(6));
+                if (data.choices?.[0]?.delta?.content) {
+                  content = data.choices[0].delta.content;
+                }
+              } catch (e) {
+                // Skip invalid JSON
+              }
+            }
+          }
+
+          if (content && content.length > 0) {
+            fullResponse += content;
+            for (const char of content) {
+              if (char === '<') {
+                if (wordBuffer !== '' && currentField) {
+                  streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+                }
+                wordBuffer = "";
+                insideTag = true;
+                currentValue = "";
+              } else if (char === '>' && insideTag) {
+                insideTag = false;
+                if (!currentValue.startsWith('/')) {
+                  currentField = currentValue;
+                }
+                currentValue = "";
+                wordBuffer = "";
+              } else if (insideTag) {
+                currentValue += char;
+              } else if (currentField) {
+                if (char === ' ' || char === '\n') {
+                  if (wordBuffer !== '') {
+                    streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+                  }
+                  streamingCallback({ stage: "streaming", field: currentField, value: char });
+                  wordBuffer = "";
+                } else {
+                  wordBuffer += char;
+                }
+              }
+            }
+          }
+        }
+        // Send any pending word buffer at the end
+        if (wordBuffer !== '') {
+          streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+        }
+      }
+
+      return fullResponse;
+    }
+  };
+  return measureFn
+    ? await measureFn(executeCall, `LLM call to ${llm}`)
+    : await measure(executeCall, `LLM call to ${llm}`);
 }
-
 // ### MCP Server Communication
 /** Discovers tools from an MCP server with measurement. */
 async function discoverTools(server: MCPServer, measureFn?: typeof measure): Promise<MCPTool[]> {

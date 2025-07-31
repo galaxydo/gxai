@@ -11,11 +11,12 @@ describe('UAI Streaming Tests', () => {
       }),
       outputFormat: z.object({
         analysis: z.object({
-          step1: z.string(),
+          step1: z.string(), // nested fieild should be named like analysis_step1
           step2: z.string(),
           step3: z.string(),
         }).describe("Step-by-step analysis of the question"),
         answer: z.string().describe("The final short concise answer to the question"),
+        status: z.string().describe("just literal word OK"), // to ensure streaming single-word responses
       }),
       temperature: 0.7,
     });
@@ -31,7 +32,7 @@ describe('UAI Streaming Tests', () => {
       const result = await streamingAgent.run(input, (update) => {
         if (update.stage === 'streaming') {
           streamingUpdates.push(update as StreamingUpdate);
-          console.log(`Field: ${update.field}, Value: ${update.value.slice(-20)}...`);
+          console.log(`Field: ${update.field}, Value: ${update.value}`);
         } else {
           progressUpdates.push(update);
         }

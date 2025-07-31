@@ -4,7 +4,7 @@
     "": {
       "name": "uaiv2",
       "dependencies": {
-        "@ments/utils": "1.0.0",
+        "@ments/utils": "1.0.2",
         "zod": "^3.25.67",
       },
       "devDependencies": {
@@ -16,7 +16,7 @@
     },
   },
   "packages": {
-    "@ments/utils": ["@ments/utils@1.0.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-vbWCZQ2cSJ1rY21mXrwC8b6F1QYrTb0bv12erDrCujIc2r2djszR2qDFoHEuddq+JNMnt5f3luXLu/dKYE8IrQ=="],
+    "@ments/utils": ["@ments/utils@1.0.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-tb78Vkb7nVxqEuo4Qo0ljrAyMQa3c/ZcMQTGR2nfNSFLdJ5CAMt/jNU8kCJkV6YMEGjx5z5XYSkIMIVYvB/riA=="],
 
     "@types/bun": ["@types/bun@1.2.16", "", { "dependencies": { "bun-types": "1.2.16" } }, "sha512-1aCZJ/6nSiViw339RsaNhkNoEloLaPzZhxMOYEa7OzRzO41IGg5n/7I43/ZIAW/c+Q6cT12Vf7fOZOoVIzb5BQ=="],
 
