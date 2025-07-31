@@ -178,8 +178,17 @@ async function callLLM(
         },
         `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
       );
-      const data = await response.json();
-      return llm.includes("claude") ? data.content[0].text : data.choices[0].message.content;
+      if (!response) {
+        throw new Error(`LLM API call to ${llm} failed. The network request did not return a response.`);
+      }
+      const data = await response.json();
+      const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error(
+          `LLM API call to ${llm} failed. Unexpected response format: ${JSON.stringify(data).substring(0, 200)}...`
+        );
+      }
+      return content;
     } else {
       // Streaming response handling
       const response = await measure(
@@ -197,6 +206,10 @@ async function callLLM(
         },
         `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`
       );
+      if (!response) {
+        throw new Error(`LLM streaming API call to ${llm} failed. The network request did not return a response.`);
+      }
+
 
       const reader = response.body?.getReader();
       if (!reader) {
@@ -382,15 +395,19 @@ async function discoverTools(server: MCPServer, measureFn?: typeof measure): Pro
       },
       `HTTP GET ${server.url}/tools`
     );
+    if (!response) {
+      throw new Error(`Failed to discover tools from ${server.name}: No response.`);
+    }
     const tools = await response.json();
     return await measure(
       async () => tools,
       `Discovered ${tools.length} tools from ${server.name}`
     );
   };
-  return measureFn
-    ? await measureFn(executeDiscovery, `Discover tools from ${server.name}`)
-    : await measure(executeDiscovery, `Discover tools from ${server.name}`);
+  const discoveredTools = await (measureFn
+    ? measureFn(executeDiscovery, `Discover tools from ${server.name}`)
+    : measure(executeDiscovery, `Discover tools from ${server.name}`));
+  return discoveredTools || [];
 }
 
 /** Invokes a tool on an MCP server with measurement. */
@@ -410,6 +427,9 @@ async function invokeTool(server: MCPServer, toolName: string, parameters: any, 
       },
       `HTTP POST ${server.url}/call - Tool: ${toolName}, Params: ${JSON.stringify(parameters).substring(0, 200)}...`
     );
+    if (!response) {
+      throw new Error(`Tool invocation for ${toolName} on ${server.name} failed: No response from server.`);
+    }
     const result = await response.json();
     return await measure(
       async () => result,
@@ -439,6 +459,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           async () => this.config.inputFormat.parse(input),
           "Validate input schema"
         );
+        if (!validatedInput) {
+          throw new Error("Input validation failed. Please check the provided input against the agent's input format.");
+        }
         let relevantServers: MCPServer[] = [];
         if (this.config.servers && this.config.servers.length > 0) {
           progressCallback?.({
@@ -502,19 +525,20 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           message: "Generating final response...",
         });
 
-        try {
-          const response = await measure(
-            async (measure) => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
-            "Generate AI response with toolResults: " + JSON.stringify(toolResults),
-          );
-          return await measure(
-            async () => this.config.outputFormat.parse(response),
-            "Validate output schema of response fields: " + Object.keys(response),
-          );
-        } catch (validationError) {
-          console.error("validationError", validationError);
-          return {};
-        }
+        const response = await measure(
+          async (measure) => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
+          "Generate AI response with toolResults: " + JSON.stringify(toolResults),
+        );
+
+        // If response generation fails, response can be null or an empty object.
+        const validationMessage = response ? `Validate output schema of response fields: ${Object.keys(response).join(", ")}` : "Skipping validation of empty response.";
+
+        const validatedResponse = await measure(
+          async () => this.config.outputFormat.parse(response || {}),
+          validationMessage
+        );
+
+        return validatedResponse || {}; // Return empty object if validation fails.
       },
       `Agent.run for ${this.config.llm}`,
       { requestId }
@@ -543,6 +567,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           { temperature: 0.3 },
           measure
         );
+        if (!response) {
+          return this.config.servers!;
+        }
         try {
           const parsed = xmlToObj(response);
           const serverNames = parsed.relevant_servers?.server_names || [];
@@ -584,6 +611,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           { temperature: 0.3 },
           measure
         );
+        if (!response) {
+          return tools.slice(0, 1);
+        }
         try {
           const parsed = xmlToObj(response);
           const toolNames = parsed.selected_tools?.tool_names || [];
@@ -623,6 +653,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           { temperature: 0.3 },
           measure
         );
+        if (!response) {
+          return {};
+        }
         try {
           const parsed = xmlToObj(response);
           const parameters = parsed.parameters || {};
@@ -676,11 +709,19 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       measure,
       streamingCallback
     ), `Executing Prompt: ${userPrompt}`);
+    if (!response) {
+      return {};
+    }
+
 
     const parsed = await measure(
       async () => xmlToObj(response),
       "Parsing Response: " + response,
     );
+    if (!parsed) {
+      return {};
+    }
+
 
     const shape = this.config.outputFormat.shape;
     const result: any = {};
