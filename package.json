@@ -1,8 +1,8 @@
 {
-  "name": "@ments/ai",
-  "module": "uai.ts",
-  "main": "./uai.ts",
-  "version": "1.3.5",
+  "name": "gx402",
+  "module": "main.ts",
+  "main": "./main.ts",
+  "version": "1.3.6",
   "type": "module",
   "private": false,
   "devDependencies": {
