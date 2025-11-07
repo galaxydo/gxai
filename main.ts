@@ -2,6 +2,9 @@ import { z } from "zod";
 
 import { measure } from "@ments/utils";
 
+import * as solanaWeb3 from "@solana/web3.js";
+import bs58 from "bs58";
+
 /** Generates a unique request ID for tracking operations. */
 function generateRequestId(): string {
   return Math.random().toString(36).substring(2, 10);
@@ -40,11 +43,12 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
+  solanaWallet?: { privateKey: string; rpcUrl?: string };
 }
 
 // ### Progress Callback Types
 export interface ProgressUpdate {
-  stage: "server_selection" | "tool_discovery" | "tool_invocation" | "response_generation" | "streaming";
+  stage: "server_selection" | "tool_discovery" | "tool_invocation" | "response_generation" | "streaming" | "input_resolution" | "payment";
   message: string;
   data?: any;
 }
@@ -126,102 +130,330 @@ function xmlToObj(xmlContent: string): any {
   return parseElement(xmlContent);
 }
 
-// ### LLM API Calls
-async function callLLM(
-  llm: LLMType,
-  messages: Array<{ role: string; content: string }>,
-  options: { temperature?: number; maxTokens?: number } = {},
-  measureFn?: typeof measure,
-  streamingCallback?: StreamingCallback
-): Promise<string> {
-  const executeCall = async (measure: typeof measure) => {
-    const { temperature = 0.7, maxTokens = 4000 } = options;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    let url = "";
-    let body: Record<string, any> = {};
-    if (llm.includes("claude")) {
-      headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
-      headers["anthropic-version"] = "2023-06-01";
-      url = "https://api.anthropic.com/v1/messages";
-      body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
-    } else if (llm.includes("deepseek")) {
-      headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
-      url = "https://api.deepseek.com/v1/chat/completions";
-      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
-    } else {
-      headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
-      url = "https://api.openai.com/v1/chat/completions";
-      if (llm.includes('o4-')) {
-        body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
-      } else {
-        body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
-      }
-    }
+// ### Main Agent Class
+export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
+  private config: AgentConfig<I, O>;
 
-    const requestBodyStr = JSON.stringify(body);
+  constructor(config: AgentConfig<I, O>) {
+    this.config = config;
+    this.validateNoArrays(this.config.outputFormat);
+  }
 
-    if (!streamingCallback) {
-      const response = await measure(
-        async () => {
-          const res = await fetch(url, {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          });
-          if (!res.ok) {
-            const errorText = await res.text();
-            throw new Error(`LLM API error: ${errorText}`);
-          }
-          return res;
-        },
-        `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`
-      );
-      if (!response) {
-        throw new Error(`LLM API call to ${llm} failed. The network request did not return a response.`);
-      }
-      const data = await response.json();
-      const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error(
-          `LLM API call to ${llm} failed. Unexpected response format: ${JSON.stringify(data).substring(0, 200)}...`
+  /** Runs the agent with the given input, using measurement for all logging. */
+  async run(input: z.infer<I>, progressCallback?: ProgressCallback, measureFn?: typeof measure): Promise<z.infer<O>> {
+    const requestId = generateRequestId();
+    return await (measureFn || measure)(
+      async (measure) => {
+        const validatedInput = await measure(
+          async () => this.config.inputFormat.parse(input),
+          "Validate input schema"
         );
-      }
-      return content;
-    } else {
-      // Streaming response handling
-      const response = await measure(
-        async () => {
-          const res = await fetch(url, {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          });
-          if (!res.ok) {
-            const errorText = await res.text();
-            throw new Error(`LLM API error: ${errorText}`);
-          }
-          return res;
-        },
-        `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`
-      );
-      if (!response) {
-        throw new Error(`LLM streaming API call to ${llm} failed. The network request did not return a response.`);
+        if (!validatedInput) {
+          throw new Error("Input validation failed. Please check the provided input against the agent's input format.");
+        }
+
+        // New step: Resolve MCP-dependent input fields
+        progressCallback?.({
+          stage: "input_resolution",
+          message: "Resolving MCP-dependent input fields...",
+        });
+        await measure(
+          async (measure) => await this.resolveMCPInputFields(validatedInput, measure, progressCallback),
+          "Resolve MCP input fields"
+        );
+
+        let relevantServers: MCPServer[] = [];
+        if (this.config.servers && this.config.servers.length > 0) {
+          progressCallback?.({
+            stage: "server_selection",
+            message: "Analyzing input to determine relevant servers...",
+          });
+          relevantServers = await measure(
+            async (measure) => await this.selectRelevantServers(validatedInput, measure),
+            "Select relevant MCP servers"
+          );
+          progressCallback?.({
+            stage: "server_selection",
+            message: `Selected ${relevantServers.length} relevant servers`,
+            data: { servers: relevantServers.map((s) => s.name) },
+          });
+        }
+        const toolResults: Record<string, any> = {};
+        if (relevantServers.length > 0) {
+          progressCallback?.({
+            stage: "tool_discovery",
+            message: "Discovering available tools...",
+          });
+          await measure(
+            async (measure) => {
+              for (const server of relevantServers) {
+                const tools = await this.discoverTools(server, measure);
+                if (tools.length > 0) {
+                  const relevantTools = await measure(
+                    async (measure) => await this.selectRelevantTools(validatedInput, tools, server, measure),
+                    `Select relevant tools from ${server.name}`
+                  );
+                  for (const tool of relevantTools) {
+                    progressCallback?.({
+                      stage: "tool_invocation",
+                      message: `Invoking ${server.name}.${tool.name}...`,
+                    });
+                    try {
+                      await measure(
+                        async (measure) => {
+                          const parameters = await measure(
+                            async (measure) => await this.generateToolParameters(validatedInput, tool, measure),
+                            `Generate parameters for ${tool.name}`
+                          );
+                          const result = await this.invokeTool(server, tool.name, parameters, measure);
+                          toolResults[`${server.name}.${tool.name}`] = result;
+                        },
+                        `Execute ${server.name}.${tool.name}`
+                      );
+                    } catch (error) {
+                      // Error handled by measure
+                    }
+                  }
+                }
+              }
+            },
+            "Discover and invoke tools"
+          );
+        }
+        progressCallback?.({
+          stage: "response_generation",
+          message: "Generating final response...",
+        });
+
+        const response = await measure(
+          async (measure) => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
+          "Generate AI response with toolResults: " + JSON.stringify(toolResults),
+        );
+
+        // If response generation fails, response can be null or an empty object.
+        const validationMessage = response ? `Validate output schema of response fields: ${Object.keys(response).join(", ")}` : "Skipping validation of empty response.";
+
+        const validatedResponse = await measure(
+          async () => this.config.outputFormat.parse(response || {}),
+          validationMessage
+        );
+
+        return validatedResponse || {}; // Return empty object if validation fails.
+      },
+      `Agent.run for ${this.config.llm}`,
+      { requestId }
+    );
+  }
+
+  private async fetchWithPayment(
+    url: string,
+    options: RequestInit,
+    measure: typeof measure,
+    description: string,
+    progressCallback?: ProgressCallback
+  ): Promise<Response> {
+    let retries = 0;
+    const maxRetries = 1;
+
+    while (true) {
+      const res = await measure(
+        async () => await fetch(url, options),
+        description
+      );
+
+      if (res.ok) {
+        return res;
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("No readable stream available");
-      }
+      if (res.status !== 402 || retries >= maxRetries || !this.config.solanaWallet) {
+        const errorText = await res.text();
+        throw new Error(`Request failed: ${res.status} - ${errorText}`);
+      }
 
-      const decoder = new TextDecoder();
-      let fullResponse = "";
+      const paymentInfo = await res.json();
+      const { amount, recipient } = paymentInfo; // Assume { amount: number in SOL, recipient: string }
+
+      progressCallback?.({
+        stage: "payment",
+        message: `Processing payment of ${amount} SOL to ${recipient}...`,
+      });
+
+      const lamports = Math.floor(amount * 1_000_000_000);
+      const privateKeyBytes = bs58.decode(this.config.solanaWallet.privateKey);
+      const fromKeypair = solanaWeb3.Keypair.fromSecretKey(privateKeyBytes);
+      const toPubkey = new solanaWeb3.PublicKey(recipient);
+
+      const transaction = new solanaWeb3.Transaction().add(
+        solanaWeb3.SystemProgram.transfer({
+          fromPubkey: fromKeypair.publicKey,
+          toPubkey,
+          lamports,
+        })
+      );
+
+      const rpcUrl = this.config.solanaWallet.rpcUrl || "https://api.mainnet-beta.solana.com";
+      const connection = new solanaWeb3.Connection(rpcUrl, "confirmed");
+
+      const signature = await measure(
+        async () => await connection.sendTransaction(transaction, [fromKeypair]),
+        `Sending Solana transaction to ${recipient}`
+      );
+
+      await measure(
+        async () => await connection.confirmTransaction(signature),
+        `Confirming Solana transaction ${signature}`
+      );
+
+      progressCallback?.({
+        stage: "payment",
+        message: `Payment confirmed. Retrying request...`,
+      });
+
+      retries++;
+    }
+  }
+
+  /** Discovers tools from an MCP server with measurement. */
+  private async discoverTools(server: MCPServer, measureFn: typeof measure): Promise<MCPTool[]> {
+    return await measureFn(
+      async (measure) => {
+        const response = await this.fetchWithPayment(
+          `${server.url}/tools`,
+          {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          },
+          measure,
+          `HTTP GET ${server.url}/tools`
+        );
+        const tools = await response.json();
+        return await measure(
+          async () => tools,
+          `Discovered ${tools.length} tools from ${server.name}`
+        );
+      },
+      `Discover tools from ${server.name}`
+    );
+  }
+
+  /** Invokes a tool on an MCP server with measurement. */
+  private async invokeTool(server: MCPServer, toolName: string, parameters: any, measureFn: typeof measure): Promise<any> {
+    const body = JSON.stringify({ method: toolName, params: parameters });
+    return await measureFn(
+      async (measure) => {
+        const response = await this.fetchWithPayment(
+          `${server.url}/call`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+          },
+          measure,
+          `HTTP POST ${server.url}/call - Tool: ${toolName}, Params: ${body.substring(0, 200)}...`
+        );
+        const result = await response.json();
+        return await measure(
+          async () => result,
+          `Tool ${toolName} returned: ${typeof result === "object" ? JSON.stringify(result).substring(0, 100) + "..." : result}`
+        );
+      },
+      `Invoke ${server.name}.${toolName}`
+    );
+  }
+
+  private async callLLM(
+    llm: LLMType,
+    messages: Array<{ role: string; content: string }>,
+    options: { temperature?: number; maxTokens?: number } = {},
+    measureFn: typeof measure,
+    streamingCallback?: StreamingCallback,
+    progressCallback?: ProgressCallback
+  ): Promise<string> {
+    const { temperature = 0.7, maxTokens = 4000 } = options;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    let url = "";
+    let body: Record<string, any> = {};
+    if (llm.includes("claude")) {
+      headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
+      headers["anthropic-version"] = "2023-06-01";
+      url = "https://api.anthropic.com/v1/messages";
+      body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
+    } else if (llm.includes("deepseek")) {
+      headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
+      url = "https://api.deepseek.com/v1/chat/completions";
+      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+    } else {
+      headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
+      url = "https://api.openai.com/v1/chat/completions";
+      if (llm.includes('o4-')) {
+        body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
+      } else {
+        body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+      }
+    }
+
+    const requestBodyStr = JSON.stringify(body);
+
+    if (!streamingCallback) {
+      const response = await measureFn(
+        async (measure) => {
+          const res = await this.fetchWithPayment(
+            url,
+            {
+              method: "POST",
+              headers,
+              body: requestBodyStr,
+            },
+            measure,
+            `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`,
+            progressCallback
+          );
+          const data = await res.json();
+          const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
+          if (!content) {
+            throw new Error(
+              `LLM API call to ${llm} failed. Unexpected response format: ${JSON.stringify(data).substring(0, 200)}...`
+            );
+          }
+          return content;
+        },
+        `LLM call to ${llm}`
+      );
+      return response;
+    } else {
+      // Streaming response handling
+      const response = await measureFn(
+        async (measure) => {
+          const res = await this.fetchWithPayment(
+            url,
+            {
+              method: "POST",
+              headers,
+              body: requestBodyStr,
+            },
+            measure,
+            `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`,
+            progressCallback
+          );
+          return res;
+        },
+        `LLM streaming call to ${llm}`
+      );
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No readable stream available");
+      }
+
+      const decoder = new TextDecoder();
+      let fullResponse = "";
       let buffer = "";
       let tagStack: string[] = [];
       let currentTagName = "";
-      let wordBuffer = "";
-      let insideTag = false;
+      let wordBuffer = "";
+      let insideTag = false;
 
       const parseSseLine = (line: string): string => {
         if (!line.startsWith("data: ") || line.includes("[DONE]")) {
@@ -276,10 +508,10 @@ async function callLLM(
         }
       };
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -290,195 +522,127 @@ async function callLLM(
             if (content) {
               processChunk(content);
             }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-        // Process any remaining buffer after the loop
+          }
+        }
+      } finally {
+        reader.releaseLock();
+        // Process any remaining buffer after the loop
         if (buffer) {
           const content = parseSseLine(buffer);
           if (content) {
             processChunk(content);
-          }
-        }
-        // Send any pending word buffer at the end
+          }
+        }
+        // Send any pending word buffer at the end
         if (wordBuffer && tagStack.length > 0 && streamingCallback) {
           streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
-        }
-      }
-
-      return fullResponse;
-    }
-  };
-  return measureFn
-    ? await measureFn(executeCall, `LLM call to ${llm}`)
-    : await measure(executeCall, `LLM call to ${llm}`);
-}
-// ### MCP Server Communication
-/** Discovers tools from an MCP server with measurement. */
-async function discoverTools(server: MCPServer, measureFn?: typeof measure): Promise<MCPTool[]> {
-  const executeDiscovery = async (measure: typeof measure) => {
-    const response = await measure(
-      async () => {
-        const res = await fetch(`${server.url}/tools`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to discover tools: ${res.statusText}`);
         }
-        return res;
-      },
-      `HTTP GET ${server.url}/tools`
-    );
-    if (!response) {
-      throw new Error(`Failed to discover tools from ${server.name}: No response.`);
+      }
+
+      return fullResponse;
     }
-    const tools = await response.json();
-    return await measure(
-      async () => tools,
-      `Discovered ${tools.length} tools from ${server.name}`
-    );
-  };
-  const discoveredTools = await (measureFn
-    ? measureFn(executeDiscovery, `Discover tools from ${server.name}`)
-    : measure(executeDiscovery, `Discover tools from ${server.name}`));
-  return discoveredTools || [];
-}
-
-/** Invokes a tool on an MCP server with measurement. */
-async function invokeTool(server: MCPServer, toolName: string, parameters: any, measureFn?: typeof measure): Promise<any> {
-  const executeInvocation = async (measure: typeof measure) => {
-    const response = await measure(
-      async () => {
-        const res = await fetch(`${server.url}/call`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ method: toolName, params: parameters }),
-        });
-        if (!res.ok) {
-          throw new Error(`Tool invocation failed: ${res.statusText}`);
-        }
-        return res;
-      },
-      `HTTP POST ${server.url}/call - Tool: ${toolName}, Params: ${JSON.stringify(parameters).substring(0, 200)}...`
-    );
-    if (!response) {
-      throw new Error(`Tool invocation for ${toolName} on ${server.name} failed: No response from server.`);
-    }
-    const result = await response.json();
-    return await measure(
-      async () => result,
-      `Tool ${toolName} returned: ${typeof result === "object" ? JSON.stringify(result).substring(0, 100) + "..." : result}`
-    );
-  };
-  return measureFn
-    ? await measureFn(executeInvocation, `Invoke ${server.name}.${toolName}`)
-    : await measure(executeInvocation, `Invoke ${server.name}.${toolName}`);
-}
-
-// ### Main Agent Class
-export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
-  private config: AgentConfig<I, O>;
-
-  constructor(config: AgentConfig<I, O>) {
-    this.config = config;
-    this.validateNoArrays(this.config.outputFormat);
   }
 
-  /** Runs the agent with the given input, using measurement for all logging. */
-  async run(input: z.infer<I>, progressCallback?: ProgressCallback, measureFn?: typeof measure): Promise<z.infer<O>> {
-    const requestId = generateRequestId();
-    return await (measureFn || measure)(
-      async (measure) => {
-        const validatedInput = await measure(
-          async () => this.config.inputFormat.parse(input),
-          "Validate input schema"
-        );
-        if (!validatedInput) {
-          throw new Error("Input validation failed. Please check the provided input against the agent's input format.");
-        }
-        let relevantServers: MCPServer[] = [];
-        if (this.config.servers && this.config.servers.length > 0) {
-          progressCallback?.({
-            stage: "server_selection",
-            message: "Analyzing input to determine relevant servers...",
-          });
-          relevantServers = await measure(
-            async (measure) => await this.selectRelevantServers(validatedInput, measure),
-            "Select relevant MCP servers"
-          );
-          progressCallback?.({
-            stage: "server_selection",
-            message: `Selected ${relevantServers.length} relevant servers`,
-            data: { servers: relevantServers.map((s) => s.name) },
-          });
-        }
-        const toolResults: Record<string, any> = {};
-        if (relevantServers.length > 0) {
-          progressCallback?.({
-            stage: "tool_discovery",
-            message: "Discovering available tools...",
-          });
-          await measure(
-            async (measure) => {
-              for (const server of relevantServers) {
-                const tools = await discoverTools(server, measure);
-                if (tools.length > 0) {
-                  const relevantTools = await measure(
-                    async (measure) => await this.selectRelevantTools(validatedInput, tools, server, measure),
-                    `Select relevant tools from ${server.name}`
-                  );
-                  for (const tool of relevantTools) {
-                    progressCallback?.({
-                      stage: "tool_invocation",
-                      message: `Invoking ${server.name}.${tool.name}...`,
-                    });
-                    try {
-                      await measure(
-                        async (measure) => {
-                          const parameters = await measure(
-                            async (measure) => await this.generateToolParameters(validatedInput, tool, measure),
-                            `Generate parameters for ${tool.name}`
-                          );
-                          const result = await invokeTool(server, tool.name, parameters, measure);
-                          toolResults[`${server.name}.${tool.name}`] = result;
-                        },
-                        `Execute ${server.name}.${tool.name}`
-                      );
-                    } catch (error) {
-                      // Error handled by measure
-                    }
-                  }
-                }
-              }
-            },
-            "Discover and invoke tools"
-          );
-        }
-        progressCallback?.({
-          stage: "response_generation",
-          message: "Generating final response...",
-        });
+  /** Resolves input fields that have MCP server links in their descriptions. */
+  private async resolveMCPInputFields(input: any, measureFn: typeof measure, progressCallback?: ProgressCallback): Promise<void> {
+    const shape = this.config.inputFormat.shape;
+    for (const [key, schema] of Object.entries(shape)) {
+      const desc = (schema as any).description as string | undefined;
+      if (!desc || !desc.startsWith("mcp:")) {
+        continue;
+      }
 
-        const response = await measure(
-          async (measure) => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
-          "Generate AI response with toolResults: " + JSON.stringify(toolResults),
-        );
+      // Extract MCP server URL from description (e.g., "mcp: https://example.com")
+      const urlMatch = desc.match(/^mcp:\s*(https?:\/\/[^\s]+)/);
+      if (!urlMatch) {
+        continue; // Skip if no valid URL found
+      }
+      const serverUrl = urlMatch[1];
 
-        // If response generation fails, response can be null or an empty object.
-        const validationMessage = response ? `Validate output schema of response fields: ${Object.keys(response).join(", ")}` : "Skipping validation of empty response.";
+      const tempServer: MCPServer = {
+        name: `resolver_${key}`,
+        description: `Temporary server for resolving input field ${key}`,
+        url: serverUrl,
+      };
 
-        const validatedResponse = await measure(
-          async () => this.config.outputFormat.parse(response || {}),
-          validationMessage
-        );
+      progressCallback?.({
+        stage: "input_resolution",
+        message: `Resolving input field "${key}" using MCP server at ${serverUrl}...`,
+      });
 
-        return validatedResponse || {}; // Return empty object if validation fails.
-      },
-      `Agent.run for ${this.config.llm}`,
-      { requestId }
-    );
+      // Discover tools from the MCP server
+      const tools = await this.discoverTools(tempServer, measureFn);
+      if (tools.length === 0) {
+        continue; // No tools available, skip
+      }
+
+      // Use LLM to select the most appropriate tool for resolving this field
+      const systemPrompt = `You are selecting the most appropriate tool from the available tools on the server to resolve the value for the input field "${key}". 
+      The field's description is: "${desc}".
+      Select only the single most relevant tool based on the field description, tool descriptions, and the provided user input.
+      If no tool seems suitable, do not select any.`;
+
+      const userPrompt = objToXml({
+        resolve_field: key,
+        field_description: desc,
+        input, // Use current input values to help select and parameterize
+        available_tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: t.inputSchema,
+        })),
+        task: "Select the tool name to invoke to resolve this field",
+        response_format: { selected_tool: "string: the name of the selected tool" },
+      });
+
+      const response = await this.callLLM(
+        this.config.llm,
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `<request>${userPrompt}</request>` },
+        ],
+        { temperature: 0.3 },
+        measureFn,
+        undefined,
+        progressCallback
+      );
+
+      if (!response) {
+        continue;
+      }
+
+      let selectedToolName: string | undefined;
+      try {
+        const parsed = xmlToObj(response);
+        selectedToolName = parsed.selected_tool;
+      } catch (error) {
+        // Parsing failed, skip
+        continue;
+      }
+
+      if (!selectedToolName) {
+        continue;
+      }
+
+      const tool = tools.find((t) => t.name === selectedToolName);
+      if (!tool) {
+        continue;
+      }
+
+      // Generate parameters for the selected tool using available input fields
+      const parameters = await this.generateToolParameters(input, tool, measureFn);
+
+      // Invoke the tool to get the resolved value
+      const result = await this.invokeTool(tempServer, tool.name, parameters, measureFn);
+
+      // Set the resolved value back into the input
+      input[key] = result;
+
+      progressCallback?.({
+        stage: "input_resolution",
+        message: `Resolved input field "${key}" with value: ${JSON.stringify(result).substring(0, 100)}...`,
+      });
+    }
   }
 
   /** Selects relevant servers based on input. */
@@ -497,7 +661,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           }),
           "Generate server selection prompt"
         );
-        const response = await callLLM(
+        const response = await this.callLLM(
           this.config.llm,
           [{ role: "system", content: systemPrompt }, { role: "user", content: `<request>${userPrompt}</request>` }],
           { temperature: 0.3 },
@@ -541,7 +705,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           }),
           "Generate tool selection prompt"
         );
-        const response = await callLLM(
+        const response = await this.callLLM(
           this.config.llm,
           [{ role: "system", content: systemPrompt }, { role: "user", content: `<request>${userPrompt}</request>` }],
           { temperature: 0.3 },
@@ -583,7 +747,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           }),
           "Generate parameter generation prompt"
         );
-        const response = await callLLM(
+        const response = await this.callLLM(
           this.config.llm,
           [{ role: "system", content: systemPrompt }, { role: "user", content: `<request>${userPrompt}</request>` }],
           { temperature: 0.3 },
@@ -638,12 +802,13 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     }
     messages.push({ role: "user", content: `<request>${userPrompt}</request>` });
 
-    const response = await measure(() => callLLM(
+    const response = await measure(() => this.callLLM(
       this.config.llm,
       messages,
       { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000 },
       measure,
-      streamingCallback
+      streamingCallback,
+      progressCallback
     ), `Executing Prompt: ${userPrompt}`);
     if (!response) {
       return {};
