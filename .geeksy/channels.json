@@ -1,0 +1,12 @@
+[
+  {
+    "id": "test",
+    "name": "Test Channel",
+    "type": "test",
+    "emoji": "🧪",
+    "enabled": true,
+    "config": {},
+    "messageCount": 0,
+    "createdAt": 1769957484751
+  }
+]

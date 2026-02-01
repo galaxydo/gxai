@@ -1,0 +1,18 @@
+[
+  {
+    "id": "example-agent",
+    "name": "Example Agent",
+    "description": "Demo agent that decides how to process messages using AI",
+    "emoji": "🧪",
+    "port": 5001,
+    "scriptPath": "packages/geeksy/src/agents/example-agent.ts",
+    "capabilities": [
+      "handle",
+      "ignore",
+      "spawn",
+      "respond"
+    ],
+    "running": false,
+    "lastActivity": 1769956491112
+  }
+]
