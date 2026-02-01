@@ -24,6 +24,8 @@ export interface MCPTool {
 }
 
 export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
+  /** Name of the agent for identification in analytics */
+  name?: string;
   llm: LLMType;
   inputFormat: I;
   outputFormat: O;
@@ -32,6 +34,8 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   temperature?: number;
   maxTokens?: number;
   solanaWallet?: { privateKey: string; rpcUrl?: string };
+  /** URL to send analytics data to (e.g., http://localhost:3002/api/record) */
+  analyticsUrl?: string;
 }
 
 export interface ProgressUpdate {

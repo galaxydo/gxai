@@ -19,90 +19,168 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
   async run(input: z.infer<I>, progressCallback?: ProgressCallback, measureFn: typeof measure = measure): Promise<z.infer<O>> {
     const requestId = generateRequestId();
-    return await measureFn(
-      async (measure) => {
-        const validatedInput = await measure(
-          async () => this.config.inputFormat.parse(input),
-          "Validate input schema"
-        );
-        if (!validatedInput) {
-          throw new Error("Input validation failed. Please check the provided input against the agent's input format.");
-        }
+    const startTime = Date.now();
+    const toolInvocations: Array<{ server: string; tool: string; parameters: any; result: any }> = [];
+    let rawPrompt: string | undefined;
+    let rawResponse: string | undefined;
 
-        progressCallback?.({
-          stage: "input_resolution",
-          message: "Resolving MCP-dependent input fields...",
-        });
-        await measure(
-          async () => await this.resolveMCPInputFields(validatedInput, measure, progressCallback),
-          "Resolve MCP input fields"
-        );
-
-        let relevantServers: MCPServer[] = [];
-        if (this.config.servers && this.config.servers.length > 0) {
-          progressCallback?.({
-            stage: "server_selection",
-            message: "Analyzing input to determine relevant servers...",
-          });
-          relevantServers = await measure(
-            async () => await this.selectRelevantServers(validatedInput, measure),
-            "Select relevant MCP servers"
+    try {
+      const result = await measureFn(
+        async (measure) => {
+          const validatedInput = await measure(
+            async () => this.config.inputFormat.parse(input),
+            "Validate input schema"
           );
+          if (!validatedInput) {
+            throw new Error("Input validation failed. Please check the provided input against the agent's input format.");
+          }
+
           progressCallback?.({
-            stage: "server_selection",
-            message: `Selected ${relevantServers.length} relevant servers`,
-            data: { servers: relevantServers.map((s) => s.name) },
-          });
-        }
-        const toolResults: Record<string, any> = {};
-        if (relevantServers.length > 0) {
-          progressCallback?.({
-            stage: "tool_discovery",
-            message: "Discovering available tools...",
+            stage: "input_resolution",
+            message: "Resolving MCP-dependent input fields...",
           });
           await measure(
-            async () => {
-              for (const server of relevantServers) {
-                const tools = await discoverTools(server, measure);
-                if (tools.length > 0) {
-                  const relevantTools = await this.selectRelevantTools(validatedInput, tools, server, measure);
-                  for (const tool of relevantTools) {
-                    progressCallback?.({
-                      stage: "tool_invocation",
-                      message: `Invoking ${server.name}.${tool.name}...`,
-                    });
-                    const parameters = await this.generateToolParameters(validatedInput, tool, measure);
-                    const result = await invokeTool(server, tool.name, parameters, measure);
-                    toolResults[`${server.name}.${tool.name}`] = result;
+            async () => await this.resolveMCPInputFields(validatedInput, measure, progressCallback),
+            "Resolve MCP input fields"
+          );
+
+          let relevantServers: MCPServer[] = [];
+          if (this.config.servers && this.config.servers.length > 0) {
+            progressCallback?.({
+              stage: "server_selection",
+              message: "Analyzing input to determine relevant servers...",
+            });
+            relevantServers = await measure(
+              async () => await this.selectRelevantServers(validatedInput, measure),
+              "Select relevant MCP servers"
+            );
+            progressCallback?.({
+              stage: "server_selection",
+              message: `Selected ${relevantServers.length} relevant servers`,
+              data: { servers: relevantServers.map((s) => s.name) },
+            });
+          }
+          const toolResults: Record<string, any> = {};
+          if (relevantServers.length > 0) {
+            progressCallback?.({
+              stage: "tool_discovery",
+              message: "Discovering available tools...",
+            });
+            await measure(
+              async () => {
+                for (const server of relevantServers) {
+                  const tools = await discoverTools(server, measure);
+                  if (tools.length > 0) {
+                    const relevantTools = await this.selectRelevantTools(validatedInput, tools, server, measure);
+                    for (const tool of relevantTools) {
+                      progressCallback?.({
+                        stage: "tool_invocation",
+                        message: `Invoking ${server.name}.${tool.name}...`,
+                      });
+                      const parameters = await this.generateToolParameters(validatedInput, tool, measure);
+                      const result = await invokeTool(server, tool.name, parameters, measure);
+                      toolResults[`${server.name}.${tool.name}`] = result;
+                      // Track tool invocation for analytics
+                      toolInvocations.push({
+                        server: server.name,
+                        tool: tool.name,
+                        parameters,
+                        result
+                      });
+                    }
                   }
                 }
-              }
-            },
-            "Discover and invoke tools"
+              },
+              "Discover and invoke tools"
+            );
+          }
+          progressCallback?.({
+            stage: "response_generation",
+            message: "Generating final response...",
+          });
+
+          const response = await measure(
+            async () => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
+            "Generate AI response with toolResults: " + JSON.stringify(toolResults),
           );
-        }
-        progressCallback?.({
-          stage: "response_generation",
-          message: "Generating final response...",
+
+          const validationMessage = response ? `Validate output schema of response fields: ${Object.keys(response).join(", ")}` : "Skipping validation of empty response.";
+
+          const validatedResponse = await measure(
+            async () => this.config.outputFormat.parse(response || {}),
+            validationMessage
+          );
+
+          return validatedResponse || {};
+        },
+        `Agent.run for ${this.config.llm}`,
+        { requestId }
+      );
+
+      // Send analytics if configured
+      if (this.config.analyticsUrl) {
+        await this.sendAnalytics({
+          id: requestId,
+          agentName: this.config.name || 'unnamed-agent',
+          llm: this.config.llm,
+          timestamp: startTime,
+          duration: Date.now() - startTime,
+          status: 'success',
+          input,
+          output: result,
+          toolInvocations: toolInvocations.length > 0 ? toolInvocations : undefined,
+          rawPrompt,
+          rawResponse
         });
+      }
 
-        const response = await measure(
-          async () => await this.generateResponse(validatedInput, toolResults, measure, progressCallback),
-          "Generate AI response with toolResults: " + JSON.stringify(toolResults),
-        );
+      return result;
+    } catch (error) {
+      // Send analytics for failed requests if configured
+      if (this.config.analyticsUrl) {
+        await this.sendAnalytics({
+          id: requestId,
+          agentName: this.config.name || 'unnamed-agent',
+          llm: this.config.llm,
+          timestamp: startTime,
+          duration: Date.now() - startTime,
+          status: 'error',
+          input,
+          output: {},
+          error: error instanceof Error ? error.message : String(error),
+          toolInvocations: toolInvocations.length > 0 ? toolInvocations : undefined
+        });
+      }
+      throw error;
+    }
+  }
 
-        const validationMessage = response ? `Validate output schema of response fields: ${Object.keys(response).join(", ")}` : "Skipping validation of empty response.";
+  private async sendAnalytics(data: {
+    id: string;
+    agentName: string;
+    llm: string;
+    timestamp: number;
+    duration: number;
+    status: 'success' | 'error';
+    input: any;
+    output: any;
+    error?: string;
+    toolInvocations?: Array<{ server: string; tool: string; parameters: any; result: any }>;
+    rawPrompt?: string;
+    rawResponse?: string;
+  }): Promise<void> {
+    if (!this.config.analyticsUrl) return;
 
-        const validatedResponse = await measure(
-          async () => this.config.outputFormat.parse(response || {}),
-          validationMessage
-        );
-
-        return validatedResponse || {}; 
-      },
-      `Agent.run for ${this.config.llm}`,
-      { requestId }
-    );
+    try {
+      await fetch(this.config.analyticsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    } catch (e) {
+      // Silently fail analytics - don't break the main flow
+      console.warn('Failed to send analytics:', e);
+    }
   }
 
   private async resolveMCPInputFields(input: any, measureFn: any, progressCallback?: ProgressCallback): Promise<void> {
@@ -115,7 +193,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
       const urlMatch = desc.match(/^mcp:\s*(https?:\/\/[^\s]+)/);
       if (!urlMatch) {
-        continue; 
+        continue;
       }
       const serverUrl = validateUrl(urlMatch[1]);
 
@@ -132,7 +210,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
       const tools = await discoverTools(tempServer, measureFn);
       if (tools.length === 0) {
-        continue; 
+        continue;
       }
 
       const systemPrompt = `You are selecting the most appropriate tool from the available tools on the server to resolve the value for the input field "${key}". 
@@ -143,7 +221,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       const userPrompt = objToXml({
         resolve_field: key,
         field_description: desc,
-        input, 
+        input,
         available_tools: tools.map((t) => ({
           name: t.name,
           description: t.description,
@@ -371,7 +449,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         streamingCallback,
         progressCallback,
         (url, options, measure, desc, pcb) => fetchWithPayment(url, options, measure, desc, pcb, this.config.solanaWallet)
-      ), 
+      ),
       `Executing Prompt: ${userPrompt.substring(0, 200)}...`
     );
     if (!response) {
