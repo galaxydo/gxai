@@ -1,0 +1,38 @@
+[
+  {
+    "id": "msg_1769944147007_6pca4q",
+    "source": "test",
+    "content": "Hello from the terminal!",
+    "timestamp": 1769944147007
+  },
+  {
+    "id": "msg_1769944908749_rpuzfz",
+    "source": "browser-test",
+    "content": "Verification message",
+    "timestamp": 1769944908750
+  },
+  {
+    "id": "msg_1769945048457_as410i",
+    "source": "browser-verification",
+    "content": "Verification message from browser subagent",
+    "timestamp": 1769945048457
+  },
+  {
+    "id": "msg_1769955754116_nbmql3",
+    "source": "test",
+    "content": "Hello from test!",
+    "timestamp": 1769955754116
+  },
+  {
+    "id": "msg_1769956352951_p517iq",
+    "source": "test",
+    "content": "Hello from browser!",
+    "timestamp": 1769956352951
+  },
+  {
+    "id": "msg_1769956508277_zy6ant",
+    "source": "telegram",
+    "content": "Hello agent! Can you help me?",
+    "timestamp": 1769956508277
+  }
+]

@@ -4,6 +4,7 @@ import { measure } from "@ments/utils";
 
 import * as solanaWeb3 from "@solana/web3.js";
 import bs58 from "bs58";
+import { GoogleGenAI } from "@google/genai";
 
 /** Generates a unique request ID for tracking operations. */
 function generateRequestId(): string {
@@ -17,9 +18,12 @@ export const LLM = {
   gpt4: "gpt-4",
   claude: "claude-3-sonnet-20240229",
   deepseek: "deepseek-chat",
+  "gemini-2.0-flash": "gemini-2.0-flash",
+  "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",
 } as const;
 
 export type LLMType = typeof LLM[keyof typeof LLM];
+
 
 // ### MCP Server and Tool Interfaces
 export interface MCPServer {
@@ -375,6 +379,12 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     };
     let url = "";
     let body: Record<string, any> = {};
+
+    // Handle Gemini separately as it uses its own SDK
+    if (llm.includes("gemini")) {
+      return await this.callGemini(llm, messages, options, measureFn, streamingCallback, progressCallback);
+    }
+
     if (llm.includes("claude")) {
       headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
       headers["anthropic-version"] = "2023-06-01";
@@ -393,6 +403,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
       }
     }
+
 
     const requestBodyStr = JSON.stringify(body);
 
@@ -541,6 +552,120 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
       return fullResponse;
     }
+  }
+
+  /** Calls Google Gemini API using the official SDK. */
+  private async callGemini(
+    llm: LLMType,
+    messages: Array<{ role: string; content: string }>,
+    options: { temperature?: number; maxTokens?: number } = {},
+    measureFn: typeof measure,
+    streamingCallback?: StreamingCallback,
+    progressCallback?: ProgressCallback
+  ): Promise<string> {
+    const { temperature = 0.7, maxTokens = 4000 } = options;
+
+    return await measureFn(
+      async (measure: typeof measureFn) => {
+        const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "" });
+        const model = genAI.models.generateContent;
+
+        // Convert messages to Gemini format
+        const systemInstruction = messages.find(m => m.role === "system")?.content;
+        const userMessages = messages.filter(m => m.role !== "system");
+
+        // Build contents array for Gemini
+        const contents = userMessages.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        }));
+
+        const request = {
+          model: llm,
+          contents,
+          config: {
+            temperature,
+            maxOutputTokens: maxTokens,
+            ...(systemInstruction && { systemInstruction }),
+          }
+        };
+
+        if (!streamingCallback) {
+          // Non-streaming
+          const response = await measure(
+            async () => await genAI.models.generateContent(request),
+            `Gemini ${llm} API call`
+          );
+
+          const text = response.text || "";
+          return text;
+        } else {
+          // Streaming
+          const response = await measure(
+            async () => await genAI.models.generateContentStream(request),
+            `Gemini ${llm} streaming API call`
+          );
+
+          let fullResponse = "";
+          let tagStack: string[] = [];
+          let currentTagName = "";
+          let wordBuffer = "";
+          let insideTag = false;
+
+          const processChunk = (chunk: string) => {
+            fullResponse += chunk;
+
+            for (const char of chunk) {
+              if (char === "<") {
+                if (wordBuffer && tagStack.length > 0) {
+                  streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
+                }
+                wordBuffer = "";
+                insideTag = true;
+                currentTagName = "";
+              } else if (char === ">" && insideTag) {
+                insideTag = false;
+                if (currentTagName.startsWith("/")) {
+                  tagStack.pop();
+                } else if (currentTagName.trim()) {
+                  tagStack.push(currentTagName.trim());
+                }
+                currentTagName = "";
+                wordBuffer = "";
+              } else if (insideTag) {
+                currentTagName += char;
+              } else if (tagStack.length > 0) {
+                const currentField = tagStack.join("_");
+                if (char === " " || char === "\n") {
+                  if (wordBuffer) {
+                    streamingCallback({ stage: "streaming", field: currentField, value: wordBuffer });
+                  }
+                  streamingCallback({ stage: "streaming", field: currentField, value: char });
+                  wordBuffer = "";
+                } else {
+                  wordBuffer += char;
+                }
+              }
+            }
+          };
+
+          for await (const chunk of response) {
+            const text = chunk.text || "";
+            if (text) {
+              processChunk(text);
+            }
+          }
+
+          // Send any pending word buffer
+          if (wordBuffer && tagStack.length > 0) {
+            streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
+          }
+
+          return fullResponse;
+        }
+      },
+      `Gemini call to ${llm}`
+    );
   }
 
   /** Resolves input fields that have MCP server links in their descriptions. */
@@ -975,7 +1100,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         } else {
           description = `Must be ${constraint}`;
         }
-        }
+      }
 
       if (description) {
         descriptions.push(`- ${currentPath} SHOULD be ${description}`);
@@ -990,6 +1115,208 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   }
 }
 
+// ### Gemini Multimodal Capabilities
+// These are standalone functions that can be used directly or within agents
+
+const getGeminiClient = () => {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY is required');
+  return new GoogleGenAI({ apiKey });
+};
+
+/**
+ * Image Generation with Imagen 4
+ * Generates photorealistic images at up to 4K resolution
+ */
+export interface ImageGenerationConfig {
+  prompt: string;
+  numberOfImages?: number;
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+  imageSize?: '1K' | '2K' | '4K';
+  model?: string;
+}
+
+export interface GeneratedImage {
+  uri: string;
+  mimeType: string;
+}
+
+export async function generateImage(config: ImageGenerationConfig): Promise<GeneratedImage[]> {
+  const ai = getGeminiClient();
+  const model = (ai as any).getImagenModel(config.model || 'imagen-4.0-generate-001');
+
+  const response = await model.generateImages({
+    prompt: config.prompt,
+    numberOfImages: config.numberOfImages || 1,
+    aspectRatio: config.aspectRatio || '1:1',
+    imageSize: config.imageSize || '2K'
+  });
+
+  return response.images.map((img: any) => ({
+    uri: img.uri || img.url,
+    mimeType: img.mimeType || 'image/png'
+  }));
+}
+
+/**
+ * Video Generation with Veo 3.1
+ * Generates high-fidelity 8-second videos asynchronously
+ */
+export interface VideoGenerationConfig {
+  prompt: string;
+  aspectRatio?: '16:9' | '9:16' | '1:1';
+  videoResolution?: '720p' | '1080p';
+  model?: string;
+  pollIntervalMs?: number;
+  onProgress?: (status: string) => void;
+}
+
+export interface GeneratedVideo {
+  uri: string;
+  durationSeconds: number;
+}
+
+export async function generateVideo(config: VideoGenerationConfig): Promise<GeneratedVideo> {
+  const ai = getGeminiClient();
+  const pollInterval = config.pollIntervalMs || 10000;
+
+  // Start the generation
+  let operation = await (ai as any).models.generateVideos({
+    model: config.model || 'veo-3.1-generate-001',
+    prompt: config.prompt,
+    config: {
+      aspect_ratio: config.aspectRatio || '16:9',
+      video_resolution: config.videoResolution || '1080p'
+    }
+  });
+
+  // Poll for completion
+  while (!operation.done) {
+    if (config.onProgress) {
+      config.onProgress(`Video rendering... (${operation.progress || 'in progress'})`);
+    }
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    operation = await (ai as any).operations.get(operation.name);
+  }
+
+  if (operation.error) {
+    throw new Error(`Video generation failed: ${operation.error.message}`);
+  }
+
+  return {
+    uri: operation.response.generatedVideos[0].uri,
+    durationSeconds: 8
+  };
+}
+
+/**
+ * Music Generation with Lyria
+ * Generates instrumental tracks with real-time steering
+ */
+export interface MusicGenerationConfig {
+  prompt: string;
+  bpm?: number;
+  brightness?: number;  // 0.0 (muffled) to 1.0 (crisp)
+  density?: number;     // 0.0 (sparse) to 1.0 (busy)
+  durationSeconds?: number;
+  model?: string;
+}
+
+export interface GeneratedMusic {
+  uri: string;
+  durationSeconds: number;
+}
+
+export async function generateMusic(config: MusicGenerationConfig): Promise<GeneratedMusic> {
+  const ai = getGeminiClient();
+
+  const response = await (ai as any).models.generateMusic({
+    model: config.model || 'lyria-002',
+    prompt: config.prompt,
+    config: {
+      bpm: config.bpm || 120,
+      brightness: config.brightness ?? 0.7,
+      density: config.density ?? 0.5,
+      duration_seconds: config.durationSeconds || 30
+    }
+  });
+
+  return {
+    uri: response.generatedMusic.uri,
+    durationSeconds: config.durationSeconds || 30
+  };
+}
+
+/**
+ * Deep Research with autonomous research agent
+ * Performs comprehensive research with citations
+ */
+export interface DeepResearchConfig {
+  query: string;
+  background?: boolean;
+  pollIntervalMs?: number;
+  onProgress?: (status: string, partialOutput?: string) => void;
+}
+
+export interface ResearchResult {
+  report: string;        // Full markdown report
+  citations: string[];   // List of sources
+  interactionId: string;
+}
+
+export async function deepResearch(config: DeepResearchConfig): Promise<ResearchResult> {
+  const ai = getGeminiClient();
+  const pollInterval = config.pollIntervalMs || 15000;
+
+  // Start the research interaction
+  const interaction = await (ai as any).interactions.create({
+    agent: 'deep-research-pro-preview-12-2025',
+    background: config.background ?? true,
+    input: [
+      {
+        type: 'text',
+        text: config.query
+      }
+    ]
+  });
+
+  // Poll for completion
+  let status = 'processing';
+  while (status !== 'completed') {
+    if (config.onProgress) {
+      config.onProgress(status);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    const currentInteraction = await (ai as any).interactions.get(interaction.id);
+    status = currentInteraction.status;
+
+    if (status === 'completed') {
+      const outputs = currentInteraction.outputs;
+      const finalReport = outputs[outputs.length - 1].text;
+
+      // Extract citations from the report
+      const citationRegex = /\[\d+\]:\s*(https?:\/\/[^\s]+)/g;
+      const citations: string[] = [];
+      let match;
+      while ((match = citationRegex.exec(finalReport)) !== null) {
+        citations.push(match[1]);
+      }
+
+      return {
+        report: finalReport,
+        citations,
+        interactionId: interaction.id
+      };
+    } else if (status === 'failed') {
+      throw new Error(`Research failed: ${currentInteraction.error?.message || 'Unknown error'}`);
+    }
+  }
+
+  throw new Error('Research did not complete');
+}
+
 // ### Utility Exports
 export const mcp = {
   server: (config: Omit<MCPServer, "name"> & { name: string }): MCPServer => config,
@@ -997,4 +1324,12 @@ export const mcp = {
 
 export const tool = {
   // Placeholder for future tool utility functions
+};
+
+// Re-export Gemini capabilities as a namespace
+export const gemini = {
+  generateImage,
+  generateVideo,
+  generateMusic,
+  deepResearch,
 };

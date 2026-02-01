@@ -1,0 +1,20 @@
+{
+    "name": "geeksy",
+    "version": "0.1.0",
+    "description": "Multi-agent orchestration system with observability dashboard",
+    "type": "module",
+    "main": "src/index.ts",
+    "bin": {
+        "geeksy": "./src/cli.ts"
+    },
+    "scripts": {
+        "dev": "bun run src/cli.ts serve",
+        "start": "bun run src/cli.ts serve",
+        "telegram": "bun run src/connectors/telegram.ts"
+    },
+    "dependencies": {
+        "gx402": "file:../../",
+        "satidb": "latest",
+        "zod": "^3.22.0"
+    }
+}
