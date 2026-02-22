@@ -27,6 +27,77 @@ export async function callLLM(
     headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
     url = "https://api.deepseek.com/v1/chat/completions";
     body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+  } else if (llm.includes("gemini")) {
+    // Gemini REST API — direct HTTP, no SDK
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
+    headers["x-goog-api-key"] = apiKey;
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
+
+    // Convert messages to Gemini's contents/parts format
+    // Gemini requires strictly alternating user/model turns and non-empty parts
+    const systemInstruction = messages.find(m => m.role === "system")?.content;
+    const nonSystemMsgs = messages
+      .filter(m => m.role !== "system" && m.content?.trim());
+
+    // Merge consecutive same-role messages (Gemini rejects them)
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    for (const m of nonSystemMsgs) {
+      const role = m.role === "assistant" ? "model" : "user";
+      const last = contents[contents.length - 1];
+      if (last && last.role === role) {
+        last.parts[0]!.text += "\n\n" + m.content;
+      } else {
+        contents.push({ role, parts: [{ text: m.content }] });
+      }
+    }
+
+    body = {
+      contents,
+      generationConfig: {
+        temperature,
+        maxOutputTokens: maxTokens,
+      },
+      ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
+    };
+
+    // Gemini has a different response format — handle inline with retry for rate limits
+    const requestBodyStr2 = JSON.stringify(body);
+    const geminiResponse = await measureFn(
+      async (measure: any) => {
+        const maxRetries = 3;
+        const retryDelays = [5000, 15000, 30000];
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          const res = await fetchWithPayment(
+            url, { method: "POST", headers, body: requestBodyStr2 },
+            measure,
+            `HTTP ${llm} API call (attempt ${attempt + 1})`,
+            progressCallback
+          );
+
+          if (res.status === 429 && attempt < maxRetries) {
+            const delay = retryDelays[attempt] ?? 30000;
+            progressCallback?.({
+              stage: "response_generation",
+              message: `Rate limited (429), retrying in ${delay / 1000}s...`,
+            });
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+
+          const data = await res.json() as any;
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!text) {
+            throw new Error(`Gemini API call failed: ${JSON.stringify(data).substring(0, 300)}`);
+          }
+          return text;
+        }
+        throw new Error(`Gemini API: exhausted ${maxRetries} retries due to rate limits`);
+      },
+      `LLM call to ${llm}`
+    );
+    return geminiResponse;
   } else {
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
     url = "https://api.openai.com/v1/chat/completions";
@@ -157,7 +228,7 @@ export async function callLLM(
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; 
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
           const content = parseSseLine(line);

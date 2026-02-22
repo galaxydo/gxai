@@ -5,17 +5,20 @@
  * Re-exports all modules for convenience.
  */
 
-// LLM Types (from new modular structure)
-export * from './llm/types';
+// Core types (canonical source — includes LLM, ProgressUpdate, etc.)
+export * from './types';
 
-// MCP Types (from new modular structure)  
-export * from './mcp/types';
+// MCP Types (MCPServer, MCPTool) 
+export { MCPServer, MCPTool } from './mcp/types';
+
+// LLM utilities (isGeminiModel, getLLMBaseUrl, getLLMApiKey)
+export { isGeminiModel, getLLMBaseUrl, getLLMApiKey } from './llm/types';
 
 // Agent (from existing structure)
 export * from './agent';
 
 // Utils (from existing structure)
-export * from './utils';
+export { generateRequestId } from './utils';
 export * from './xml';
 
 // Gemini multimodal (from new modular structure)
@@ -24,5 +27,5 @@ export * from './gemini/multimodal';
 // Validation
 export * from './validation';
 
-// Types
-export * from './types';
+// Loop Agent (agentic loop with tool use)
+export * from './loop';
