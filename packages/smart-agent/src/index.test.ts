@@ -210,13 +210,20 @@ describe("Tools", () => {
 // ── Agent Tests ──
 
 describe("Agent", () => {
-    test("constructor requires objectives", () => {
-        expect(() => new Agent({ model: "test", objectives: [] })).toThrow("At least one objective")
+    test("constructor allows empty objectives for plan()", () => {
+        const agent = new Agent({ model: "test" })
+        expect(agent).toBeDefined()
     })
 
-    test("constructor accepts valid config", () => {
+    test("run() throws without objectives", async () => {
+        const agent = new Agent({ model: "test" })
+        const gen = agent.run("hello")
+        await expect(gen.next()).rejects.toThrow("No objectives defined")
+    })
+
+    test("constructor accepts valid config with objectives", () => {
         const agent = new Agent({
-            model: "gemini-2.0-flash",
+            model: "gemini-3-flash-preview",
             objectives: [{
                 name: "test",
                 description: "A test objective",
@@ -243,3 +250,114 @@ describe("Agent", () => {
         expect(agent).toBeDefined()
     })
 })
+
+// ── Objectives Tests ──
+
+describe("Objectives", () => {
+    const { hydrateObjective } = require("./objectives")
+    const tmpDir = join(process.cwd(), ".test-obj-tmp")
+
+    test("file_exists — met when file exists", async () => {
+        mkdirSync(tmpDir, { recursive: true })
+        writeFileSync(join(tmpDir, "check.txt"), "hello")
+
+        const obj = hydrateObjective({
+            name: "file_check",
+            description: "Check file",
+            type: "file_exists",
+            params: { path: "check.txt" },
+        }, tmpDir)
+
+        const result = await obj.validate({
+            messages: [], iteration: 0, toolHistory: [], touchedFiles: new Set(),
+        })
+        expect(result.met).toBe(true)
+        rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    test("file_exists — not met when missing", async () => {
+        const obj = hydrateObjective({
+            name: "missing",
+            description: "Missing file",
+            type: "file_exists",
+            params: { path: "nonexistent-12345.txt" },
+        }, ".")
+
+        const result = await obj.validate({
+            messages: [], iteration: 0, toolHistory: [], touchedFiles: new Set(),
+        })
+        expect(result.met).toBe(false)
+    })
+
+    test("command_succeeds — met when last exec succeeded", () => {
+        const obj = hydrateObjective({
+            name: "cmd",
+            description: "Command check",
+            type: "command_succeeds",
+            params: { command: "bun test" },
+        }, ".")
+
+        const result = obj.validate({
+            messages: [],
+            iteration: 0,
+            toolHistory: [{
+                iteration: 0,
+                tool: "exec",
+                params: { command: "bun test" },
+                result: { success: true, output: "pass" },
+            }],
+            touchedFiles: new Set(),
+        })
+        expect(result.met).toBe(true)
+    })
+
+    test("command_succeeds — not met when not run", () => {
+        const obj = hydrateObjective({
+            name: "cmd",
+            description: "Command check",
+            type: "command_succeeds",
+            params: { command: "bun test" },
+        }, ".")
+
+        const result = obj.validate({
+            messages: [], iteration: 0, toolHistory: [], touchedFiles: new Set(),
+        })
+        expect(result.met).toBe(false)
+    })
+
+    test("command_output_contains — checks output text", () => {
+        const obj = hydrateObjective({
+            name: "output",
+            description: "Output check",
+            type: "command_output_contains",
+            params: { command: "echo", text: "hello" },
+        }, ".")
+
+        const met = obj.validate({
+            messages: [],
+            iteration: 0,
+            toolHistory: [{
+                iteration: 0,
+                tool: "exec",
+                params: { command: "echo hello" },
+                result: { success: true, output: "hello world" },
+            }],
+            touchedFiles: new Set(),
+        })
+        expect(met.met).toBe(true)
+
+        const notMet = obj.validate({
+            messages: [],
+            iteration: 0,
+            toolHistory: [{
+                iteration: 0,
+                tool: "exec",
+                params: { command: "echo bye" },
+                result: { success: true, output: "bye world" },
+            }],
+            touchedFiles: new Set(),
+        })
+        expect(notMet.met).toBe(false)
+    })
+})
+

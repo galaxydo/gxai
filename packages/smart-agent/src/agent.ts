@@ -5,7 +5,10 @@ import type {
     AgentConfig,
     AgentEvent,
     AgentState,
+    Message,
+    Objective,
     ObjectiveResult,
+    PlannedObjective,
     Tool,
     ToolInvocation,
     ToolResult,
@@ -14,17 +17,17 @@ import { createBuiltinTools } from "./tools"
 import { callLLM } from "./llm"
 import { loadSkills, formatSkillsForPrompt } from "./skills"
 import { objToXml, xmlToObj } from "./xml"
+import { hydrateObjective, PLANNER_SYSTEM_PROMPT } from "./objectives"
 
 export class Agent {
-    private config: Required<Pick<AgentConfig, "model" | "objectives" | "maxIterations" | "temperature" | "maxTokens" | "cwd" | "toolTimeoutMs">> & AgentConfig
+    private config: Required<Pick<AgentConfig, "model" | "maxIterations" | "temperature" | "maxTokens" | "cwd" | "toolTimeoutMs">> & AgentConfig
+    private objectives: Objective[]
     private tools: Map<string, Tool>
     private skillsPrompt: string = ""
     private initialized = false
 
     constructor(config: AgentConfig) {
-        if (!config.objectives || config.objectives.length === 0) {
-            throw new Error("At least one objective is required")
-        }
+        this.objectives = config.objectives || []
 
         this.config = {
             ...config,
@@ -59,15 +62,26 @@ export class Agent {
     }
 
     /**
-     * Run the agentic loop. Yields AgentEvents as it progresses.
+     * Run the agentic loop with predefined objectives.
      * 
+     * Accepts a simple string prompt OR a message array for conversation history:
      * ```ts
-     * for await (const event of agent.run("fix the tests")) {
-     *   console.log(event.type, event)
-     * }
+     * // Simple prompt
+     * for await (const event of agent.run("fix the tests")) {}
+     * 
+     * // Conversation history
+     * for await (const event of agent.run([
+     *   { role: "user", content: "fix the auth tests" },
+     *   { role: "assistant", content: "I'll look at the test files..." },
+     *   { role: "user", content: "focus on login.test.ts" },
+     * ])) {}
      * ```
      */
-    async *run(prompt: string): AsyncGenerator<AgentEvent> {
+    async *run(input: string | Message[]): AsyncGenerator<AgentEvent> {
+        if (this.objectives.length === 0) {
+            throw new Error("No objectives defined. Use Agent.plan() for dynamic objective generation, or pass objectives in the constructor.")
+        }
+
         await this.ensureInitialized()
         const startTime = Date.now()
 
@@ -78,20 +92,97 @@ export class Agent {
             touchedFiles: new Set(),
         }
 
-        // System prompt
+        // System prompt as first message
         state.messages.push({
             role: "system",
             content: this.buildSystemPrompt(),
-            timestamp: Date.now(),
         })
 
-        // User prompt
-        state.messages.push({
-            role: "user",
-            content: prompt,
-            timestamp: Date.now(),
+        // User input — string or message array
+        if (typeof input === "string") {
+            state.messages.push({ role: "user", content: input })
+        } else {
+            // Append conversation history after system prompt
+            for (const msg of input) {
+                if (msg.role === "system") continue // skip — we already have our system prompt
+                state.messages.push({ role: msg.role, content: msg.content })
+            }
+        }
+
+        yield* this.executeLoop(state, startTime)
+    }
+
+    /**
+     * Plan + execute: dynamically generate objectives from a user prompt, then run.
+     * 
+     * Uses a planner LLM call to analyze the user's request and create
+     * verifiable objectives, then executes the agent with those objectives.
+     * 
+     * ```ts
+     * for await (const event of Agent.plan("make the auth tests pass", {
+     *   model: "gemini-3-flash-preview",
+     *   skills: ["./skills/bun.yaml"],
+     * })) {
+     *   console.log(event.type)
+     * }
+     * ```
+     */
+    static async *plan(input: string | Message[], config: AgentConfig): AsyncGenerator<AgentEvent> {
+        const cwd = config.cwd ?? process.cwd()
+
+        // Extract the user's actual prompt
+        const userPrompt = typeof input === "string"
+            ? input
+            : input.filter(m => m.role === "user").map(m => m.content).join("\n")
+
+        // ── Stage 1: Planner — generate objectives ──
+        const plannerMessages: Array<{ role: string; content: string }> = [
+            { role: "system", content: PLANNER_SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+        ]
+
+        const plannerResponse = await measure("Planner", () =>
+            callLLM(config.model, plannerMessages, {
+                temperature: config.temperature ?? 0.3,
+                maxTokens: config.maxTokens ?? 4000,
+            })
+        )
+
+        // Parse the planner's JSON response
+        let planned: PlannedObjective[]
+        try {
+            // Strip markdown code fences if present
+            let json = (plannerResponse || "").trim()
+            if (json.startsWith("```")) {
+                json = json.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
+            }
+            planned = JSON.parse(json)
+            if (!Array.isArray(planned) || planned.length === 0) {
+                throw new Error("Planner returned empty objectives")
+            }
+        } catch (e: any) {
+            yield { type: "error", iteration: -1, error: `Planner failed to generate objectives: ${e.message}\nRaw: ${(plannerResponse || "").substring(0, 300)}` }
+            return
+        }
+
+        // Hydrate planned objectives into real Objective objects
+        const objectives = planned.map(p => hydrateObjective(p, cwd))
+
+        // Emit planning event so consumers know what's being worked on
+        yield { type: "planning", objectives: planned }
+
+        // ── Stage 2: Worker — execute with generated objectives ──
+        const agent = new Agent({
+            ...config,
+            objectives,
         })
 
+        yield* agent.run(input)
+    }
+
+    // ── Core loop (shared by run + plan) ──
+
+    private async *executeLoop(state: AgentState, startTime: number): AsyncGenerator<AgentEvent> {
         for (let i = 0; i < this.config.maxIterations; i++) {
             state.iteration = i
             yield { type: "iteration_start", iteration: i, elapsed: Date.now() - startTime }
@@ -111,11 +202,11 @@ export class Agent {
 
                 if (!llmResponse) {
                     yield { type: "error", iteration: i, error: "LLM returned empty response" }
-                    state.messages.push({ role: "user", content: "Empty response. Try again.", timestamp: Date.now() })
+                    state.messages.push({ role: "user", content: "Empty response. Try again." })
                     continue
                 }
 
-                state.messages.push({ role: "assistant", content: llmResponse, timestamp: Date.now() })
+                state.messages.push({ role: "assistant", content: llmResponse })
 
                 // ── Parse structured XML response ──
                 const parsed = this.parseResponse(llmResponse)
@@ -158,7 +249,6 @@ export class Agent {
                     state.messages.push({
                         role: "tool",
                         content: `Tool results:\n\n${toolMessages.join("\n\n")}`,
-                        timestamp: Date.now(),
                     })
                 }
 
@@ -175,7 +265,6 @@ export class Agent {
 
                 // Not all met — add feedback for next iteration
                 if (invocations.length === 0) {
-                    // LLM didn't use any tools but objectives aren't met — nudge it
                     const feedback = objectiveResults
                         .filter(o => !o.met)
                         .map(o => `- "${o.name}": NOT MET — ${o.reason}`)
@@ -184,7 +273,6 @@ export class Agent {
                     state.messages.push({
                         role: "user",
                         content: `The following objectives are NOT met yet. Use tools to make progress:\n${feedback}`,
-                        timestamp: Date.now(),
                     })
                 }
 
@@ -193,7 +281,6 @@ export class Agent {
                 state.messages.push({
                     role: "user",
                     content: `Error in iteration ${i}: ${error.message}. Recover and continue.`,
-                    timestamp: Date.now(),
                 })
             }
         }
@@ -213,7 +300,7 @@ export class Agent {
             })
             .join("\n\n")
 
-        const objectiveList = this.config.objectives
+        const objectiveList = this.objectives
             .map((o, i) => `  ${i + 1}. [${o.name}] ${o.description}`)
             .join("\n")
 
@@ -295,7 +382,7 @@ RULES:
     private async checkObjectives(state: AgentState): Promise<Array<{ name: string; met: boolean; reason: string }>> {
         const results: Array<{ name: string; met: boolean; reason: string }> = []
 
-        for (const objective of this.config.objectives) {
+        for (const objective of this.objectives) {
             try {
                 const result: ObjectiveResult = await objective.validate(state)
                 results.push({ name: objective.name, met: result.met, reason: result.reason })

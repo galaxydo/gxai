@@ -13,6 +13,7 @@ bun add smart-agent
 ```ts
 import { Agent } from "smart-agent"
 
+// Predefined objectives
 const agent = new Agent({
   model: "gemini-3-flash-preview",
   objectives: [{
@@ -28,6 +29,43 @@ const agent = new Agent({
 
 for await (const event of agent.run("Create hello.txt")) {
   console.log(event.type, event)
+}
+```
+
+## Chatbot Mode — `Agent.plan()`
+
+When you don't know the objectives upfront, `Agent.plan()` uses a planner LLM to generate them from the user's message:
+
+```ts
+import { Agent } from "smart-agent"
+
+// No predefined objectives — planner generates them
+for await (const event of Agent.plan(
+  "Create a greeting.txt with 'Hello World'",
+  { model: "gemini-3-flash-preview" }
+)) {
+  if (event.type === "planning") {
+    console.log("Generated objectives:", event.objectives)
+  }
+  if (event.type === "complete") {
+    console.log("Done!")
+  }
+}
+```
+
+The planner analyzes the prompt and creates verifiable objectives using templates (`file_exists`, `file_contains`, `command_succeeds`, `command_output_contains`), then a worker agent executes them.
+
+## Conversation History
+
+Pass a message array instead of a string to provide conversation context:
+
+```ts
+for await (const event of agent.run([
+  { role: "user", content: "fix the auth tests" },
+  { role: "assistant", content: "I'll look at the test files..." },
+  { role: "user", content: "focus on login.test.ts" },
+])) {
+  // agent has full conversation context
 }
 ```
 
@@ -49,8 +87,8 @@ prompt → LLM → XML response → execute tools → check objectives → loop
 
 ```ts
 interface AgentConfig {
-  model: string                    // LLM model (gemini-3-flash-preview, gpt-4o, claude-sonnet-4-20250514, etc.)
-  objectives: Objective[]          // Goals to achieve (required, at least 1)
+  model: string                    // LLM model name
+  objectives?: Objective[]         // Goals to achieve (required for run(), optional for plan())
   skills?: (string | Skill)[]     // YAML file paths or inline Skill objects
   maxIterations?: number           // Default: 20
   temperature?: number             // Default: 0.3
@@ -62,20 +100,26 @@ interface AgentConfig {
 }
 ```
 
-### `agent.run(prompt): AsyncGenerator<AgentEvent>`
+### `agent.run(input): AsyncGenerator<AgentEvent>`
 
-Yields events as it works:
+Run with predefined objectives. Accepts `string` or `Message[]`.
 
-| Event | Fields | When |
-|-------|--------|------|
-| `iteration_start` | `iteration`, `elapsed` | Each loop iteration begins |
-| `thinking` | `message` | LLM explains what it's doing |
-| `tool_start` | `tool`, `params` | About to execute a tool |
-| `tool_result` | `tool`, `result` | Tool finished |
-| `objective_check` | `results[]` | After tools run, objectives are validated |
-| `complete` | `iteration`, `elapsed` | All objectives met |
-| `error` | `error` | Something failed (agent recovers) |
-| `max_iterations` | `iteration` | Gave up |
+### `Agent.plan(input, config): AsyncGenerator<AgentEvent>`
+
+Dynamic mode — planner generates objectives from the prompt, then worker executes.
+
+### Events
+
+| Event | When |
+|-------|------|
+| `planning` | Planner generated objectives (plan() only) |
+| `iteration_start` | Loop iteration begins |
+| `thinking` | LLM explains what it's doing |
+| `tool_start` / `tool_result` | Tool execution |
+| `objective_check` | Objectives validated |
+| `complete` | All objectives met |
+| `error` | Something failed (agent recovers) |
+| `max_iterations` | Gave up |
 
 ## Built-in Tools
 
@@ -135,6 +179,18 @@ The `state` object contains:
 - `toolHistory` — All tool calls and results
 - `touchedFiles` — Set of files modified
 - `iteration` — Current iteration number
+
+## Objective Templates
+
+When using `Agent.plan()`, the planner generates objectives using these templates:
+
+| Template | Params | Checks |
+|----------|--------|--------|
+| `file_exists` | `path`, `contains?` | File exists (optionally with content) |
+| `file_contains` | `path`, `text` | File contains specific text |
+| `command_succeeds` | `command` | Command exits with code 0 |
+| `command_output_contains` | `command`, `text` | Command output contains text |
+| `custom_check` | `check` | Generic fallback |
 
 ## LLM Support
 
