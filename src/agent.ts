@@ -6,7 +6,8 @@ import { objToXml, xmlToObj } from './xml';
 import { callLLM } from './inference';
 import { discoverTools, invokeTool } from './mcp';
 import { fetchWithPayment } from './payments';
-import { generateRequestId, validateUrl } from './utils';
+import { generateRequestId } from './utils';
+import { validateUrl } from './validation';
 
 export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   private config: AgentConfig<I, O>;

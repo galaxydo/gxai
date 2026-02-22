@@ -3,14 +3,12 @@
  */
 import { describe, test, expect } from 'bun:test';
 
-// LLM Module
-import { LLM, isGeminiModel } from './llm/types';
+// All imports from consolidated types.ts
+import { LLM, isGeminiModel, mcp, type MCPServer, type MCPTool } from './types';
 
-// MCP Module  
-import { mcp, type MCPServer, type MCPTool } from './mcp/types';
-
-// Utils (existing structure)
-import { validateUrl, generateRequestId } from './utils';
+// Utils
+import { generateRequestId } from './utils';
+import { validateUrl } from './validation';
 import { objToXml, xmlToObj } from './xml';
 
 // Gemini Module
@@ -77,7 +75,7 @@ describe('XML Utils', () => {
         const obj = xmlToObj(xml);
 
         expect(obj.name).toBe('test');
-        expect(obj.value).toBe(42); // Should be number now
+        expect(obj.value).toBe(42);
     });
 });
 

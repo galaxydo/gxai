@@ -23,11 +23,10 @@ export interface MCPServer {
 export interface MCPTool {
   name: string;
   description: string;
-  inputSchema: any; // JSON schema for tool parameters
+  inputSchema: any;
 }
 
 export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
-  /** Name of the agent for identification in analytics */
   name?: string;
   llm: LLMType;
   inputFormat: I;
@@ -37,7 +36,6 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   temperature?: number;
   maxTokens?: number;
   solanaWallet?: { privateKey: string; rpcUrl?: string };
-  /** URL to send analytics data to (e.g., http://localhost:3002/api/record) */
   analyticsUrl?: string;
 }
 
@@ -55,3 +53,49 @@ export interface StreamingUpdate {
 
 export type ProgressCallback = (update: ProgressUpdate) => void;
 export type StreamingCallback = (update: StreamingUpdate) => void;
+
+// --- LLM helpers (merged from src/llm/types.ts) ---
+
+export function isGeminiModel(llm: LLMType | string): boolean {
+  return llm.toString().startsWith('gemini');
+}
+
+export function getLLMBaseUrl(llm: LLMType | string): string {
+  if (llm.startsWith('gpt') || llm.startsWith('o4-')) return 'https://api.openai.com/v1/chat/completions';
+  if (llm.startsWith('claude')) return 'https://api.anthropic.com/v1/messages';
+  if (llm === 'deepseek-chat') return 'https://api.deepseek.com/v1/chat/completions';
+  if (llm.startsWith('gemini')) {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
+  }
+  throw new Error(`Unknown LLM provider for: ${llm}`);
+}
+
+export function getLLMApiKey(llm: LLMType | string): string {
+  if (llm.startsWith('gpt') || llm.startsWith('o4-')) {
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) throw new Error('OPENAI_API_KEY not set');
+    return key;
+  }
+  if (llm.startsWith('claude')) {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) throw new Error('ANTHROPIC_API_KEY not set');
+    return key;
+  }
+  if (llm === 'deepseek-chat') {
+    const key = process.env.DEEPSEEK_API_KEY;
+    if (!key) throw new Error('DEEPSEEK_API_KEY not set');
+    return key;
+  }
+  if (llm.startsWith('gemini')) {
+    const key = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    if (!key) throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY not set');
+    return key;
+  }
+  throw new Error(`Unknown LLM provider for: ${llm}`);
+}
+
+// --- MCP helper ---
+
+export const mcp = {
+  server: (config: MCPServer): MCPServer => config,
+};

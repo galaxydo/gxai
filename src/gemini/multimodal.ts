@@ -2,17 +2,38 @@
  * Gemini Multimodal Capabilities
  * 
  * Image, Video, Music generation and Deep Research
+ * Uses Gemini REST API directly (no SDK)
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { measure } from "measure-fn";
+import { getLLMApiKey } from "../types";
 
-/**
- * Get a configured Gemini client
- */
-export function getGeminiClient(): GoogleGenAI {
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY is required');
-    return new GoogleGenAI({ apiKey });
+function getApiKey(): string {
+    return getLLMApiKey('gemini-2.0-flash'); // any gemini model triggers the right env lookup
+}
+
+async function geminiPost(url: string, body: any): Promise<any> {
+    const apiKey = getApiKey();
+    const res = await fetch(`${url}?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Gemini API ${res.status}: ${text.substring(0, 300)}`);
+    }
+    return res.json();
+}
+
+async function geminiGet(url: string): Promise<any> {
+    const apiKey = getApiKey();
+    const res = await fetch(`${url}?key=${apiKey}`);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Gemini API ${res.status}: ${text.substring(0, 300)}`);
+    }
+    return res.json();
 }
 
 // ============================================
@@ -32,24 +53,29 @@ export interface GeneratedImage {
     mimeType: string;
 }
 
-/**
- * Generate photorealistic images using Imagen 4
- */
 export async function generateImage(config: ImageGenerationConfig): Promise<GeneratedImage[]> {
-    const ai = getGeminiClient();
-    const model = (ai as any).getImagenModel(config.model || 'imagen-4.0-generate-001');
+    const model = config.model || 'imagen-4.0-generate-001';
 
-    const response = await model.generateImages({
-        prompt: config.prompt,
-        numberOfImages: config.numberOfImages || 1,
-        aspectRatio: config.aspectRatio || '1:1',
-        imageSize: config.imageSize || '2K'
-    });
+    return await measure(`Imagen ${model}`, async () => {
+        const data = await geminiPost(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`,
+            {
+                instances: [{ prompt: config.prompt }],
+                parameters: {
+                    sampleCount: config.numberOfImages || 1,
+                    aspectRatio: config.aspectRatio || '1:1',
+                    imageSize: config.imageSize || '2K',
+                }
+            }
+        );
 
-    return response.images.map((img: any) => ({
-        uri: img.uri || img.url,
-        mimeType: img.mimeType || 'image/png'
-    }));
+        return (data.predictions || []).map((pred: any) => ({
+            uri: pred.bytesBase64Encoded
+                ? `data:image/png;base64,${pred.bytesBase64Encoded}`
+                : pred.uri || pred.url,
+            mimeType: pred.mimeType || 'image/png'
+        }));
+    }) ?? [];
 }
 
 // ============================================
@@ -70,40 +96,41 @@ export interface GeneratedVideo {
     durationSeconds: number;
 }
 
-/**
- * Generate high-fidelity videos using Veo 3.1
- */
 export async function generateVideo(config: VideoGenerationConfig): Promise<GeneratedVideo> {
-    const ai = getGeminiClient();
+    const model = config.model || 'veo-3.1-generate-001';
     const pollInterval = config.pollIntervalMs || 10000;
 
-    // Start the generation
-    let operation = await (ai as any).models.generateVideos({
-        model: config.model || 'veo-3.1-generate-001',
-        prompt: config.prompt,
-        config: {
-            aspect_ratio: config.aspectRatio || '16:9',
-            video_resolution: config.videoResolution || '1080p'
+    return await measure.assert(`Video ${model}`, async () => {
+        // Start generation
+        let operation = await geminiPost(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateVideos`,
+            {
+                prompt: config.prompt,
+                config: {
+                    aspect_ratio: config.aspectRatio || '16:9',
+                    video_resolution: config.videoResolution || '1080p'
+                }
+            }
+        );
+
+        // Poll for completion
+        while (!operation.done) {
+            config.onProgress?.(`Video rendering... (${operation.metadata?.progress || 'in progress'})`);
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+            operation = await geminiGet(
+                `https://generativelanguage.googleapis.com/v1beta/${operation.name}`
+            );
         }
+
+        if (operation.error) {
+            throw new Error(`Video generation failed: ${operation.error.message}`);
+        }
+
+        return {
+            uri: operation.response.generatedVideos[0].uri,
+            durationSeconds: 8
+        };
     });
-
-    // Poll for completion
-    while (!operation.done) {
-        if (config.onProgress) {
-            config.onProgress(`Video rendering... (${operation.progress || 'in progress'})`);
-        }
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-        operation = await (ai as any).operations.get(operation.name);
-    }
-
-    if (operation.error) {
-        throw new Error(`Video generation failed: ${operation.error.message}`);
-    }
-
-    return {
-        uri: operation.response.generatedVideos[0].uri,
-        durationSeconds: 8
-    };
 }
 
 // ============================================
@@ -113,8 +140,8 @@ export async function generateVideo(config: VideoGenerationConfig): Promise<Gene
 export interface MusicGenerationConfig {
     prompt: string;
     bpm?: number;
-    brightness?: number;  // 0.0 (muffled) to 1.0 (crisp)
-    density?: number;     // 0.0 (sparse) to 1.0 (busy)
+    brightness?: number;
+    density?: number;
     durationSeconds?: number;
     model?: string;
 }
@@ -124,27 +151,28 @@ export interface GeneratedMusic {
     durationSeconds: number;
 }
 
-/**
- * Generate instrumental music using Lyria
- */
 export async function generateMusic(config: MusicGenerationConfig): Promise<GeneratedMusic> {
-    const ai = getGeminiClient();
+    const model = config.model || 'lyria-002';
 
-    const response = await (ai as any).models.generateMusic({
-        model: config.model || 'lyria-002',
-        prompt: config.prompt,
-        config: {
-            bpm: config.bpm || 120,
-            brightness: config.brightness ?? 0.7,
-            density: config.density ?? 0.5,
-            duration_seconds: config.durationSeconds || 30
-        }
+    return await measure.assert(`Music ${model}`, async () => {
+        const data = await geminiPost(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateMusic`,
+            {
+                prompt: config.prompt,
+                config: {
+                    bpm: config.bpm || 120,
+                    brightness: config.brightness ?? 0.7,
+                    density: config.density ?? 0.5,
+                    duration_seconds: config.durationSeconds || 30
+                }
+            }
+        );
+
+        return {
+            uri: data.generatedMusic.uri,
+            durationSeconds: config.durationSeconds || 30
+        };
     });
-
-    return {
-        uri: response.generatedMusic.uri,
-        durationSeconds: config.durationSeconds || 30
-    };
 }
 
 // ============================================
@@ -159,68 +187,56 @@ export interface DeepResearchConfig {
 }
 
 export interface ResearchResult {
-    report: string;        // Full markdown report
-    citations: string[];   // List of sources
+    report: string;
+    citations: string[];
     interactionId: string;
 }
 
-/**
- * Perform comprehensive research using autonomous research agent
- */
 export async function deepResearch(config: DeepResearchConfig): Promise<ResearchResult> {
-    const ai = getGeminiClient();
     const pollInterval = config.pollIntervalMs || 15000;
 
-    // Start the research interaction
-    const interaction = await (ai as any).interactions.create({
-        agent: 'deep-research-pro-preview-12-2025',
-        background: config.background ?? true,
-        input: [
+    return await measure.assert('Deep Research', async () => {
+        const interaction = await geminiPost(
+            'https://generativelanguage.googleapis.com/v1beta/interactions',
             {
-                type: 'text',
-                text: config.query
+                agent: 'deep-research-pro-preview-12-2025',
+                background: config.background ?? true,
+                input: [{ type: 'text', text: config.query }]
             }
-        ]
+        );
+
+        let status = 'processing';
+        while (status !== 'completed') {
+            config.onProgress?.(status);
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+            const current = await geminiGet(
+                `https://generativelanguage.googleapis.com/v1beta/interactions/${interaction.id}`
+            );
+            status = current.status;
+
+            if (status === 'completed') {
+                const outputs = current.outputs;
+                const finalReport = outputs[outputs.length - 1].text;
+
+                const citationRegex = /\[\d+\]:\s*(https?:\/\/[^\s]+)/g;
+                const citations: string[] = [];
+                let match;
+                while ((match = citationRegex.exec(finalReport)) !== null) {
+                    citations.push(match[1]);
+                }
+
+                return { report: finalReport, citations, interactionId: interaction.id };
+            } else if (status === 'failed') {
+                throw new Error(`Research failed: ${current.error?.message || 'Unknown error'}`);
+            }
+        }
+
+        throw new Error('Research did not complete');
     });
-
-    // Poll for completion
-    let status = 'processing';
-    while (status !== 'completed') {
-        if (config.onProgress) {
-            config.onProgress(status);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-        const currentInteraction = await (ai as any).interactions.get(interaction.id);
-        status = currentInteraction.status;
-
-        if (status === 'completed') {
-            const outputs = currentInteraction.outputs;
-            const finalReport = outputs[outputs.length - 1].text;
-
-            // Extract citations from the report
-            const citationRegex = /\[\d+\]:\s*(https?:\/\/[^\s]+)/g;
-            const citations: string[] = [];
-            let match;
-            while ((match = citationRegex.exec(finalReport)) !== null) {
-                citations.push(match[1]);
-            }
-
-            return {
-                report: finalReport,
-                citations,
-                interactionId: interaction.id
-            };
-        } else if (status === 'failed') {
-            throw new Error(`Research failed: ${currentInteraction.error?.message || 'Unknown error'}`);
-        }
-    }
-
-    throw new Error('Research did not complete');
 }
 
-// Namespace export for convenience
+// Namespace export
 export const gemini = {
     generateImage,
     generateVideo,

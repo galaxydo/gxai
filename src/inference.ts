@@ -1,7 +1,7 @@
 // src/inference.ts
 import { measure } from "measure-fn";
 import type { ProgressCallback, StreamingCallback, StreamingUpdate } from './types';
-import type { LLMType } from './llm/types';
+import type { LLMType } from './types';
 
 export async function callLLM(
   llm: LLMType | string,

@@ -1,31 +1,35 @@
 /**
  * GXAI - AI Agent Framework
  * 
- * This is the main entry point for the modular package.
- * Re-exports all modules for convenience.
+ * Main entry point. All exports from flat src/*.ts files.
  */
 
-// Core types (canonical source — includes LLM, ProgressUpdate, etc.)
+// Core types + LLM helpers + MCP helper
 export * from './types';
 
-// MCP Types (MCPServer, MCPTool) 
-export { MCPServer, MCPTool } from './mcp/types';
+// Agents
+export { Agent } from './agent';
 
-// LLM utilities (isGeminiModel, getLLMBaseUrl, getLLMApiKey)
-export { isGeminiModel, getLLMBaseUrl, getLLMApiKey } from './llm/types';
+// Inference
+export { callLLM } from './inference';
 
-// Agent (from existing structure)
-export * from './agent';
+// MCP
+export { discoverTools, invokeTool } from './mcp';
 
-// Utils (from existing structure)
-export { generateRequestId } from './utils';
-export * from './xml';
+// Payments
+export { fetchWithPayment } from './payments';
 
-// Gemini multimodal (from new modular structure)
-export * from './gemini/multimodal';
+// XML
+export { objToXml, xmlToObj } from './xml';
 
 // Validation
-export * from './validation';
+export { validateUrl, validateNoArrays, getSchemaTypeName } from './validation';
 
-// Loop Agent (agentic loop with tool use)
+// Utils
+export { generateRequestId } from './utils';
+
+// Gemini multimodal
+export { gemini, generateImage, generateVideo, generateMusic, deepResearch } from './gemini/multimodal';
+
+// Loop Agent
 export * from './loop';
