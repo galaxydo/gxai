@@ -87,7 +87,7 @@ export function xmlToObj(xmlContent: string): any {
 
 if (import.meta.env.NODE_ENV === "test") {
   const { test, expect, describe } = await import('bun:test');
-  const { measureSync } = await import('@ments/utils');
+  const { measureSync } = await import('measure-fn');
 
   describe("XML Utils", () => {
     test("realistic prompt object round-trip with descriptions and arrays, compares XML vs JSON token efficiency using tiktoken", async () => {

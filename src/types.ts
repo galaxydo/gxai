@@ -7,6 +7,9 @@ export const LLM = {
   gpt4: "gpt-4",
   claude: "claude-3-sonnet-20240229",
   deepseek: "deepseek-chat",
+  "gemini-2.0-flash": "gemini-2.0-flash",
+  "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",
+  "gemini-3-flash-preview": "gemini-2.0-flash",
 } as const;
 
 export type LLMType = typeof LLM[keyof typeof LLM];

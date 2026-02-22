@@ -101,7 +101,7 @@ export class LoopAgent {
                         m,
                         undefined,
                         undefined,
-                        (url, options, mFn, desc, pcb) => fetchWithPayment(url, options, mFn, desc, pcb)
+                        (url, options, _mFn, desc, pcb) => fetchWithPayment(url, options, desc, pcb)
                     );
                 });
 

@@ -1,16 +1,16 @@
 // src/inference.ts
-import { expect, test } from 'bun:test';
-import { LLMType, ProgressUpdate, StreamingUpdate } from './types';
-import { ProgressCallback, StreamingCallback } from './types';
+import { measure } from "measure-fn";
+import type { ProgressCallback, StreamingCallback, StreamingUpdate } from './types';
+import type { LLMType } from './llm/types';
 
 export async function callLLM(
-  llm: LLMType,
+  llm: LLMType | string,
   messages: Array<{ role: string; content: string }>,
   options: { temperature?: number; maxTokens?: number } = {},
-  measureFn: any,
+  _measureFn?: any,
   streamingCallback?: StreamingCallback,
   progressCallback?: ProgressCallback,
-  fetchWithPayment: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
+  customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
   const { temperature = 0.7, maxTokens = 4000 } = options;
   const headers: Record<string, string> = {
@@ -18,6 +18,7 @@ export async function callLLM(
   };
   let url = "";
   let body: Record<string, any> = {};
+
   if (llm.includes("claude")) {
     headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
     headers["anthropic-version"] = "2023-06-01";
@@ -28,17 +29,15 @@ export async function callLLM(
     url = "https://api.deepseek.com/v1/chat/completions";
     body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
   } else if (llm.includes("gemini")) {
-    // Gemini REST API — direct HTTP, no SDK
+    // Gemini REST API — self-contained with measure.retry for rate limits
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (!apiKey) throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
     headers["x-goog-api-key"] = apiKey;
     url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
 
-    // Convert messages to Gemini's contents/parts format
-    // Gemini requires strictly alternating user/model turns and non-empty parts
+    // Convert messages to Gemini contents/parts format
     const systemInstruction = messages.find(m => m.role === "system")?.content;
-    const nonSystemMsgs = messages
-      .filter(m => m.role !== "system" && m.content?.trim());
+    const nonSystemMsgs = messages.filter(m => m.role !== "system" && m.content?.trim());
 
     // Merge consecutive same-role messages (Gemini rejects them)
     const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
@@ -54,19 +53,14 @@ export async function callLLM(
 
     body = {
       contents,
-      generationConfig: {
-        temperature,
-        maxOutputTokens: maxTokens,
-      },
+      generationConfig: { temperature, maxOutputTokens: maxTokens },
       ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
     };
 
-    // Gemini uses a different response format — self-contained with measure.retry for rate limits
-    const { measure: mfn } = await import("measure-fn");
-    const requestBodyStr2 = JSON.stringify(body);
+    const requestBodyStr = JSON.stringify(body);
 
-    return await mfn.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
-      const res = await fetch(url, { method: "POST", headers, body: requestBodyStr2 });
+    return await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
+      const res = await fetch(url, { method: "POST", headers, body: requestBodyStr });
 
       if (res.status === 429) {
         throw new Error(`Rate limited (429) — will retry`);
@@ -91,50 +85,24 @@ export async function callLLM(
 
   const requestBodyStr = JSON.stringify(body);
 
+  // Use customFetch (for x402 payment flow) or plain fetch
+  const doFetch = customFetch
+    ? (u: string, o: RequestInit, desc: string) => customFetch(u, o, null, desc, progressCallback)
+    : (u: string, o: RequestInit, _desc: string) => fetch(u, o);
+
   if (!streamingCallback) {
-    const response = await measureFn(
-      async (measure: any) => {
-        const res = await fetchWithPayment(
-          url,
-          {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          },
-          measure,
-          `HTTP ${llm} API call - Body: ${requestBodyStr.substring(0, 200)}...`,
-          progressCallback
-        );
-        const data = await res.json();
-        const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
-        if (!content) {
-          throw new Error(
-            `LLM API call to ${llm} failed. Unexpected response format: ${JSON.stringify(data).substring(0, 200)}...`
-          );
-        }
-        return content;
-      },
-      `LLM call to ${llm}`
-    );
-    return response;
+    const content = await measure(`LLM call ${llm}`, async () => {
+      const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} API`);
+      const data = await res.json() as any;
+      const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error(`LLM API call to ${llm} failed. Unexpected response: ${JSON.stringify(data).substring(0, 200)}...`);
+      }
+      return content;
+    });
+    return content ?? '';
   } else {
-    const response = await measureFn(
-      async (measure: any) => {
-        const res = await fetchWithPayment(
-          url,
-          {
-            method: "POST",
-            headers,
-            body: requestBodyStr,
-          },
-          measure,
-          `HTTP ${llm} streaming API call - Body: ${requestBodyStr.substring(0, 200)}...`,
-          progressCallback
-        );
-        return res;
-      },
-      `LLM streaming call to ${llm}`
-    );
+    const response = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} streaming`);
 
     const reader = response.body?.getReader();
     if (!reader) {
@@ -150,9 +118,7 @@ export async function callLLM(
     let insideTag = false;
 
     const parseSseLine = (line: string): string => {
-      if (!line.startsWith("data: ") || line.includes("[DONE]")) {
-        return "";
-      }
+      if (!line.startsWith("data: ") || line.includes("[DONE]")) return "";
       try {
         const data = JSON.parse(line.slice(6));
         if (llm.includes("claude")) {
@@ -213,18 +179,14 @@ export async function callLLM(
 
         for (const line of lines) {
           const content = parseSseLine(line);
-          if (content) {
-            processChunk(content);
-          }
+          if (content) processChunk(content);
         }
       }
     } finally {
       reader.releaseLock();
       if (buffer) {
         const content = parseSseLine(buffer);
-        if (content) {
-          processChunk(content);
-        }
+        if (content) processChunk(content);
       }
       if (wordBuffer && tagStack.length > 0 && streamingCallback) {
         streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
@@ -237,47 +199,46 @@ export async function callLLM(
 
 if (import.meta.env.NODE_ENV === "test") {
   const { test, expect } = await import('bun:test');
-  const { measure } = await import('@ments/utils');
 
   test('callLLM non-streaming mock', async () => {
-    const mockFetchWithPayment = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'test response' } }] }));
-    const mockMeasure = async (fn: any, desc: string) => await fn(mockMeasure);
-    const result = await callLLM(
-      'gpt-4o-mini',
-      [{ role: 'user', content: 'hello' }],
-      {},
-      mockMeasure,
-      undefined,
-      undefined,
-      mockFetchWithPayment
-    );
-    expect(result).toBe('test response');
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: 'test response' } }] }))
+    ) as any;
+    try {
+      const result = await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hello' }], {});
+      expect(result).toBe('test response');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('callLLM with streaming mock', async () => {
     const mockStream = new ReadableStream({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "test "}}]}\n\n'));
-        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "stream"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "<response>"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "hello world"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "</response>"}}]}\n\n'));
         controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
         controller.close();
       }
     });
-    const mockResponse = new Response(mockStream);
-    const mockFetchWithPayment = async () => mockResponse;
-    const mockMeasure = async (fn: any, desc: string) => await fn(mockMeasure);
-    const streamingUpdates: StreamingUpdate[] = [];
-    const mockStreamingCallback = (update: StreamingUpdate) => streamingUpdates.push(update);
-    const result = await callLLM(
-      'gpt-4o-mini',
-      [{ role: 'user', content: 'hello' }],
-      {},
-      mockMeasure,
-      mockStreamingCallback,
-      undefined,
-      mockFetchWithPayment
-    );
-    expect(result).toContain('test stream');
-    expect(streamingUpdates.length).toBeGreaterThan(0);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(mockStream)) as any;
+    try {
+      const streamingUpdates: StreamingUpdate[] = [];
+      const result = await callLLM(
+        'gpt-4o-mini',
+        [{ role: 'user', content: 'hello' }],
+        {},
+        null,
+        (update) => streamingUpdates.push(update)
+      );
+      expect(result).toContain('hello world');
+      expect(streamingUpdates.length).toBeGreaterThan(0);
+      expect(streamingUpdates[0].field).toBe('response');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 }

@@ -1,14 +1,12 @@
 // src/payments.ts
 import * as solanaWeb3 from "@solana/web3.js";
 import bs58 from "bs58";
-import { expect, test } from 'bun:test';
+import { measure } from "measure-fn";
 import { ProgressCallback } from './types';
-import { measure } from "@ments/utils";
 
 export async function fetchWithPayment(
   url: string,
   options: RequestInit,
-  measure: any,
   description: string,
   progressCallback?: ProgressCallback,
   solanaWallet?: { privateKey: string; rpcUrl?: string }
@@ -17,14 +15,10 @@ export async function fetchWithPayment(
   const maxRetries = 1;
 
   while (true) {
-    const res = await measure(
-      async () => await fetch(url, options),
-      description
-    );
+    const res = await measure(description, () => fetch(url, options));
 
-    if (res.ok) {
-      return res;
-    }
+    if (!res) throw new Error(`${description}: fetch returned null`);
+    if (res.ok) return res;
 
     if (res.status !== 402 || retries >= maxRetries || !solanaWallet) {
       const errorText = await res.text();
@@ -32,7 +26,7 @@ export async function fetchWithPayment(
     }
 
     const paymentInfo = await res.json();
-    const { amount, recipient } = paymentInfo; 
+    const { amount, recipient } = paymentInfo;
 
     progressCallback?.({
       stage: "payment",
@@ -55,14 +49,14 @@ export async function fetchWithPayment(
     const rpcUrl = solanaWallet.rpcUrl || "https://api.mainnet-beta.solana.com";
     const connection = new solanaWeb3.Connection(rpcUrl, "confirmed");
 
-    const signature = await measure(
-      async () => await connection.sendTransaction(transaction, [fromKeypair]),
-      `Sending Solana transaction to ${recipient}`
+    const signature = await measure.assert(
+      `Solana tx → ${recipient}`,
+      () => connection.sendTransaction(transaction, [fromKeypair])
     );
 
-    await measure(
-      async () => await connection.confirmTransaction(signature),
-      `Confirming Solana transaction ${signature}`
+    await measure.assert(
+      `Confirm tx ${signature}`,
+      () => connection.confirmTransaction(signature)
     );
 
     progressCallback?.({
@@ -76,27 +70,25 @@ export async function fetchWithPayment(
 
 if (import.meta.env.NODE_ENV === "test") {
   const { test, expect } = await import('bun:test');
-  const { measure } = await import('@ments/utils');
 
   test('fetchWithPayment success', async () => {
-    const mockFetch = async () => new Response('ok', { status: 200 });
-    const mockMeasure = async (fn: any, desc: string) => fn(mockMeasure);
-    const res = await fetchWithPayment('url', {}, mockMeasure, 'desc');
-    expect(res.ok).toBe(true);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('ok', { status: 200 }) as any;
+    try {
+      const res = await fetchWithPayment('https://example.com', {}, 'test fetch');
+      expect(res.ok).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
-  test('fetchWithPayment handles payment retry', async () => {
-    let callCount = 0;
-    const mockFetch = async () => {
-      callCount++;
-      if (callCount === 1) {
-        return new Response(JSON.stringify({ amount: 0.001, recipient: 'test' }), { status: 402 });
-      }
-      return new Response('ok', { status: 200 });
-    };
-    const mockMeasure = async (fn: any, desc: string) => fn(mockMeasure);
-    const mockWallet = { privateKey: bs58.encode(new Uint8Array(64).fill(0)) }; // Mock key
-    // Mock solana connections, etc., but for test, assume it throws or something; this is partial
-    await expect(fetchWithPayment('url', {}, mockMeasure, 'desc', undefined, mockWallet)).rejects.toThrow();
+  test('fetchWithPayment throws on non-402 error', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('Not Found', { status: 404 }) as any;
+    try {
+      await expect(fetchWithPayment('https://example.com', {}, 'test fetch')).rejects.toThrow('404');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 }
