@@ -61,43 +61,24 @@ export async function callLLM(
       ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
     };
 
-    // Gemini has a different response format — handle inline with retry for rate limits
+    // Gemini uses a different response format — self-contained with measure.retry for rate limits
+    const { measure: mfn } = await import("measure-fn");
     const requestBodyStr2 = JSON.stringify(body);
-    const geminiResponse = await measureFn(
-      async (measure: any) => {
-        const maxRetries = 3;
-        const retryDelays = [5000, 15000, 30000];
 
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          const res = await fetchWithPayment(
-            url, { method: "POST", headers, body: requestBodyStr2 },
-            measure,
-            `HTTP ${llm} API call (attempt ${attempt + 1})`,
-            progressCallback
-          );
+    return await mfn.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
+      const res = await fetch(url, { method: "POST", headers, body: requestBodyStr2 });
 
-          if (res.status === 429 && attempt < maxRetries) {
-            const delay = retryDelays[attempt] ?? 30000;
-            progressCallback?.({
-              stage: "response_generation",
-              message: `Rate limited (429), retrying in ${delay / 1000}s...`,
-            });
-            await new Promise(r => setTimeout(r, delay));
-            continue;
-          }
+      if (res.status === 429) {
+        throw new Error(`Rate limited (429) — will retry`);
+      }
 
-          const data = await res.json() as any;
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!text) {
-            throw new Error(`Gemini API call failed: ${JSON.stringify(data).substring(0, 300)}`);
-          }
-          return text;
-        }
-        throw new Error(`Gemini API: exhausted ${maxRetries} retries due to rate limits`);
-      },
-      `LLM call to ${llm}`
-    );
-    return geminiResponse;
+      const data = await res.json() as any;
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error(`Gemini API call failed: ${JSON.stringify(data).substring(0, 300)}`);
+      }
+      return text;
+    });
   } else {
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
     url = "https://api.openai.com/v1/chat/completions";

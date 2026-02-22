@@ -1,7 +1,7 @@
 // src/loop/agent.ts
 // Agentic loop — iterates LLM + tools until desired outcomes are achieved with confidence
 import { z } from "zod";
-import { measure } from "@ments/utils";
+import { measure } from "measure-fn";
 import { objToXml, xmlToObj } from "../xml";
 import { callLLM } from "../inference";
 import { fetchWithPayment } from "../payments";
@@ -62,7 +62,7 @@ export class LoopAgent {
      * }
      * ```
      */
-    async *run(userPrompt: string, measureFn: typeof measure = measure): AsyncGenerator<LoopEvent> {
+    async *run(userPrompt: string): AsyncGenerator<LoopEvent> {
         const startTime = Date.now();
 
         const state: LoopState = {
@@ -83,31 +83,37 @@ export class LoopAgent {
 
         for (let i = 0; i < this.config.maxIterations; i++) {
             state.iteration = i;
-            const iterationStartTime = Date.now();
 
             yield { type: "iteration_start", iteration: i, totalElapsedMs: Date.now() - startTime };
 
             try {
                 // Call LLM with full conversation history
-                const llmResponse = await measureFn(
-                    async (m: any) => {
-                        const messages = state.messages.map(msg => ({
-                            role: msg.role === "tool" ? "user" : msg.role,
-                            content: msg.content,
-                        }));
+                const llmResponse = await measure.assert(`Iteration ${i}`, async (m) => {
+                    const messages = state.messages.map(msg => ({
+                        role: msg.role === "tool" ? "user" : msg.role,
+                        content: msg.content,
+                    }));
 
-                        return await callLLM(
-                            this.config.llm as any,
-                            messages,
-                            { temperature: this.config.temperature, maxTokens: this.config.maxTokens },
-                            m,
-                            undefined,
-                            undefined,
-                            (url, options, mFn, desc, pcb) => fetchWithPayment(url, options, mFn, desc, pcb)
-                        );
-                    },
-                    `LoopAgent iteration ${i}`
-                );
+                    return await callLLM(
+                        this.config.llm as any,
+                        messages,
+                        { temperature: this.config.temperature, maxTokens: this.config.maxTokens },
+                        m,
+                        undefined,
+                        undefined,
+                        (url, options, mFn, desc, pcb) => fetchWithPayment(url, options, mFn, desc, pcb)
+                    );
+                });
+
+                if (!llmResponse) {
+                    yield { type: "error", iteration: i, error: "LLM returned empty response" };
+                    state.messages.push({
+                        role: "user",
+                        content: `LLM returned empty response in iteration ${i}. Try again.`,
+                        timestamp: Date.now(),
+                    });
+                    continue;
+                }
 
                 // Add assistant message to history
                 state.messages.push({ role: "assistant", content: llmResponse, timestamp: Date.now() });
@@ -181,11 +187,11 @@ export class LoopAgent {
 
                         yield { type: "tool_start", iteration: i, tool: invocation.tool, params: invocation.params };
 
-                        // Execute the tool
-                        const result = await measureFn(
-                            async () => await tool.execute(invocation.params),
-                            `Tool: ${invocation.tool}`
-                        );
+                        // Execute the tool — measured
+                        const result = await measure(
+                            `Tool: ${invocation.tool}`,
+                            () => tool.execute(invocation.params)
+                        ) as ToolResult;
 
                         state.toolHistory.push({
                             iteration: i,

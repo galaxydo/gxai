@@ -8,6 +8,7 @@
         "@google/genai": "^1.39.0",
         "@ments/utils": "1.0.2",
         "@solana/web3.js": "^1.98.4",
+        "measure-fn": "^3.6.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
         "zod": "^3.25.67",
@@ -449,6 +450,8 @@
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
+
+    "measure-fn": ["measure-fn@3.6.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-JOMHDNX8MJX48xc4SupxLZ4XrygDdA0wVdQM9ZsxYAi7uvK4JdWEyGtIU08yPVyEzAOeVLFoys2WVerGRzWXng=="],
 
     "media-typer": ["media-typer@1.1.0", "", {}, "sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw=="],
 
