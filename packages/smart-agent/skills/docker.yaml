@@ -1,0 +1,37 @@
+name: docker
+description: Docker container management — build, run, and manage containers
+commands:
+  - name: build
+    description: Build a Docker image from a Dockerfile
+    usage: "docker build -t {tag} {context}"
+    params:
+      tag: "Image tag (e.g. myapp:latest)"
+      context: "Build context directory (default: .)"
+  - name: run
+    description: Run a container from an image
+    usage: "docker run {flags} {image} {cmd}"
+    params:
+      image: "Image to run"
+      flags: "Optional flags (-d for detached, -p for port mapping, --name for naming)"
+      cmd: "Optional command to run in container"
+  - name: ps
+    description: List running containers
+    usage: "docker ps {flags}"
+    params:
+      flags: "Use -a to show all containers"
+  - name: stop
+    description: Stop a running container
+    usage: "docker stop {container}"
+    params:
+      container: "Container name or ID"
+  - name: logs
+    description: View container logs
+    usage: "docker logs {flags} {container}"
+    params:
+      container: "Container name or ID"
+      flags: "Use -f to follow, --tail N to limit"
+  - name: compose
+    description: Docker Compose operations
+    usage: "docker compose {subcommand}"
+    params:
+      subcommand: "up -d, down, logs, ps, etc."

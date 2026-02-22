@@ -1,0 +1,36 @@
+name: git
+description: Git version control — staging, committing, branching, and history
+commands:
+  - name: status
+    description: Show working tree status
+    usage: "git status"
+  - name: add
+    description: Stage files for commit
+    usage: "git add {path}"
+    params:
+      path: "File or directory to stage (use . for all)"
+  - name: commit
+    description: Create a commit with a message
+    usage: "git commit -m \"{message}\""
+    params:
+      message: "Commit message"
+  - name: log
+    description: Show recent commit history
+    usage: "git log --oneline -n {count}"
+    params:
+      count: "Number of commits to show (default: 10)"
+  - name: diff
+    description: Show changes in working directory
+    usage: "git diff {path}"
+    params:
+      path: "Optional file path to diff"
+  - name: branch
+    description: List or create branches
+    usage: "git branch {name}"
+    params:
+      name: "Branch name (omit to list all)"
+  - name: checkout
+    description: Switch branches or restore files
+    usage: "git checkout {target}"
+    params:
+      target: "Branch name or file path"

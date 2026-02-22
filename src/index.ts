@@ -31,5 +31,5 @@ export { generateRequestId } from './utils';
 // Gemini multimodal
 export { gemini, generateImage, generateVideo, generateMusic, deepResearch } from './gemini/multimodal';
 
-// Loop Agent
-export * from './loop';
+// Loop Agent → now lives in packages/smart-agent
+// export * from './loop';
