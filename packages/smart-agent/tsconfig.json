@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "strict": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "verbatimModuleSyntax": true,
+        "types": [
+            "bun-types"
+        ]
+    },
+    "include": [
+        "src"
+    ]
+}
