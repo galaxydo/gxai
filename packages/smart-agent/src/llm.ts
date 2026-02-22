@@ -55,7 +55,7 @@ export async function callLLM(
         if (!apiKey) throw new Error("ANTHROPIC_API_KEY required")
 
         const body = { model, max_tokens: maxTokens, messages, stream: false }
-        const res = await measure(`LLM ${model}`, () =>
+        const res = (await measure(`LLM ${model}`, () =>
             fetch("https://api.anthropic.com/v1/messages", {
                 method: "POST",
                 headers: {
@@ -65,7 +65,7 @@ export async function callLLM(
                 },
                 body: JSON.stringify(body),
             })
-        )
+        ))!
 
         const data = await res.json() as any
         const text = data.content?.[0]?.text
@@ -79,13 +79,13 @@ export async function callLLM(
         if (!apiKey) throw new Error("DEEPSEEK_API_KEY required")
 
         const body = { model, temperature, messages, max_tokens: maxTokens, stream: false }
-        const res = await measure(`LLM ${model}`, () =>
+        const res = (await measure(`LLM ${model}`, () =>
             fetch("https://api.deepseek.com/v1/chat/completions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
                 body: JSON.stringify(body),
             })
-        )
+        ))!
 
         const data = await res.json() as any
         const text = data.choices?.[0]?.message?.content
@@ -93,25 +93,28 @@ export async function callLLM(
         return text
     }
 
-    // ── OpenAI (default) ──
+    // ── Default: OpenAI-compatible /chat/completions ──
+    // Works with OpenAI, OpenRouter, local models, or any compatible API
     const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error("OPENAI_API_KEY required")
+    if (!apiKey) throw new Error("OPENAI_API_KEY required for model: " + model)
+
+    const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "")
 
     const isReasoning = model.includes("o4-") || model.includes("o3-")
     const body = isReasoning
         ? { model, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: false }
         : { model, temperature, messages, max_tokens: maxTokens, stream: false }
 
-    const res = await measure(`LLM ${model}`, () =>
-        fetch("https://api.openai.com/v1/chat/completions", {
+    const res = (await measure(`LLM ${model}`, () =>
+        fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify(body),
         })
-    )
+    ))!
 
     const data = await res.json() as any
     const text = data.choices?.[0]?.message?.content
-    if (!text) throw new Error(`OpenAI failed: ${JSON.stringify(data).substring(0, 300)}`)
+    if (!text) throw new Error(`LLM ${model} failed: ${JSON.stringify(data).substring(0, 300)}`)
     return text
 }
