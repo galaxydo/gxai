@@ -2,7 +2,7 @@
 import * as solanaWeb3 from "@solana/web3.js";
 import bs58 from "bs58";
 import { measure } from "measure-fn";
-import { ProgressCallback } from './types';
+import type { ProgressCallback } from './types';
 
 export async function fetchWithPayment(
   url: string,
@@ -25,7 +25,7 @@ export async function fetchWithPayment(
       throw new Error(`Request failed: ${res.status} - ${errorText}`);
     }
 
-    const paymentInfo = await res.json();
+    const paymentInfo = await res.json() as { amount: number; recipient: string };
     const { amount, recipient } = paymentInfo;
 
     progressCallback?.({

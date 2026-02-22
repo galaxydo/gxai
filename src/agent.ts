@@ -1,7 +1,7 @@
 // src/agent.ts
 import { z } from "zod";
 import { measure } from "measure-fn";
-import { AgentConfig, MCPTool, MCPServer, ProgressCallback, ProgressUpdate, StreamingCallback, StreamingUpdate } from './types';
+import type { AgentConfig, MCPTool, MCPServer, ProgressCallback, ProgressUpdate, StreamingCallback, StreamingUpdate } from './types';
 import { objToXml, xmlToObj } from './xml';
 import { callLLM } from './inference';
 import { discoverTools, invokeTool } from './mcp';
@@ -353,7 +353,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     progressCallback?: ProgressCallback
   ): Promise<any> {
     const streamingCallback: StreamingCallback | undefined = progressCallback ?
-      (update: StreamingUpdate) => progressCallback(update as ProgressUpdate) :
+      (update: StreamingUpdate) => progressCallback(update as unknown as ProgressUpdate) :
       undefined;
 
     const systemPrompt = this.config.systemPrompt || "";
@@ -370,7 +370,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       obj.context = { tool_results: toolResults };
     }
     const userPrompt = objToXml(obj);
-    const messages = [];
+    const messages: Array<{ role: string; content: string }> = [];
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt })
     }
@@ -422,7 +422,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     for (const [key, fieldSchema] of Object.entries(shape)) {
       const currentPath = path ? `${path}.${key}` : key;
 
-      let currentSchema = fieldSchema as z.ZodType<any>;
+      let currentSchema = fieldSchema as any;
       while (currentSchema._def.typeName === 'ZodOptional' || currentSchema._def.typeName === 'ZodNullable') {
         currentSchema = currentSchema.unwrap();
       }
@@ -438,10 +438,11 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   }
 
   private getSchemaTypeName(schema: z.ZodType<any>): string {
-    if (schema._def.typeName === "ZodOptional" || schema._def.typeName === "ZodNullable") {
-      return this.getSchemaTypeName(schema.unwrap());
+    const def = schema._def as any;
+    if (def.typeName === "ZodOptional" || def.typeName === "ZodNullable") {
+      return this.getSchemaTypeName((schema as any).unwrap());
     }
-    return schema._def.typeName;
+    return def.typeName;
   }
 
   private getOutputFormatDescription(): any {
@@ -449,9 +450,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     const description: any = {};
 
     for (const [key, schema] of Object.entries(shape)) {
-      const zodSchema = schema as z.ZodType<any>;
-
-      let currentSchema = zodSchema;
+      let currentSchema = schema as any;
       while (currentSchema._def.typeName === 'ZodOptional' || currentSchema._def.typeName === 'ZodNullable') {
         currentSchema = currentSchema.unwrap();
       }
@@ -471,9 +470,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     const description: any = {};
 
     for (const [key, fieldSchema] of Object.entries(shape)) {
-      const zodSchema = fieldSchema as z.ZodType<any>;
-
-      let currentSchema = zodSchema;
+      let currentSchema = fieldSchema as any;
       while (currentSchema._def.typeName === 'ZodOptional' || currentSchema._def.typeName === 'ZodNullable') {
         currentSchema = currentSchema.unwrap();
       }
@@ -505,15 +502,14 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
     for (const [key, fieldSchema] of Object.entries(shape)) {
       const currentPath = path ? `${path}_${key}` : key;
-      const zodSchema = fieldSchema as z.ZodType<any>;
 
-      let currentSchema = zodSchema;
-      let description = (zodSchema as any).description || '';
+      let currentSchema = fieldSchema as any;
+      let description = (fieldSchema as any).description || '';
 
       while (currentSchema._def.typeName === 'ZodOptional' || currentSchema._def.typeName === 'ZodNullable') {
         currentSchema = currentSchema.unwrap();
         if (!description) {
-          description = (currentSchema as any).description || '';
+          description = currentSchema.description || '';
         }
       }
 
@@ -521,8 +517,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       if (currentSchema._def.typeName === 'ZodBoolean') {
         constraint = 'either "true" or "false"';
       } else if (currentSchema._def.typeName === 'ZodEnum') {
-        const enumSchema = currentSchema as z.ZodEnum<any>;
-        const allowedValues = enumSchema._def.values;
+        const allowedValues = currentSchema._def.values;
         constraint = `exactly one of these values: ${allowedValues.map((v: string) => `"${v}"`).join(', ')}`;
       }
 

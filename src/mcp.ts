@@ -1,6 +1,6 @@
 // src/mcp.ts
 import { measure } from "measure-fn";
-import { MCPServer, MCPTool } from './types';
+import type { MCPServer, MCPTool } from './types';
 import { fetchWithPayment } from './payments';
 
 export async function discoverTools(server: MCPServer): Promise<MCPTool[]> {
