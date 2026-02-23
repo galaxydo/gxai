@@ -1,5 +1,8 @@
 // app/src/page.client.tsx — Client mount script for chat interactivity
 import { render } from 'melina/client';
+import { measure, measureSync, configure } from 'measure-fn';
+
+configure({ timestamps: true });
 
 interface AgentEvent {
     type: string
@@ -78,11 +81,11 @@ export default function mount() {
 }
 
 async function loadSkills() {
-    try {
+    await measure('Load skills', async () => {
         const res = await fetch('/api/chat')
         state.availableSkills = await res.json()
         renderSkillChips()
-    } catch { }
+    })
 }
 
 function renderSkillChips() {
@@ -127,46 +130,54 @@ async function sendMessage() {
     const loadingEl = appendLoading()
 
     // SSE stream
-    try {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: text,
-                model: modelSelect.value,
-                skills: [...state.activeSkills],
-                sessionId: state.sessionId,
-            }),
-        })
+    await measure(`Chat: "${text.substring(0, 40)}"`, async (m) => {
+        try {
+            const res = await m('POST /api/chat', () => fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    model: modelSelect.value,
+                    skills: [...state.activeSkills],
+                    sessionId: state.sessionId,
+                }),
+            }))
 
-        const reader = res.body!.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
+            if (!res) throw new Error('No response')
 
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
+            const reader = res.body!.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+            let eventCount = 0
 
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
 
-            let eventType = ''
-            for (const line of lines) {
-                if (line.startsWith('event: ')) {
-                    eventType = line.slice(7)
-                } else if (line.startsWith('data: ') && eventType) {
-                    try {
-                        const data = JSON.parse(line.slice(6))
-                        handleEvent(eventType, data)
-                    } catch { }
-                    eventType = ''
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop() || ''
+
+                let eventType = ''
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        eventType = line.slice(7)
+                    } else if (line.startsWith('data: ') && eventType) {
+                        try {
+                            const data = JSON.parse(line.slice(6))
+                            eventCount++
+                            handleEvent(eventType, data)
+                        } catch { }
+                        eventType = ''
+                    }
                 }
             }
+
+            measureSync(`Processed ${eventCount} SSE events`)
+        } catch (err: any) {
+            appendCard('error', 'Connection Error', err.message || 'Failed to connect')
         }
-    } catch (err: any) {
-        appendCard('error', 'Connection Error', err.message || 'Failed to connect')
-    }
+    })
 
     loadingEl.remove()
     state.isRunning = false

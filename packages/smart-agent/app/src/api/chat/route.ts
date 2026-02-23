@@ -1,4 +1,5 @@
 // app/src/api/chat/route.ts — SSE streaming endpoint with Session pipeline
+import { measure, measureSync } from "measure-fn"
 import { Session } from "../../../../src"
 import type { AgentConfig } from "../../../../src"
 import { join } from "path"
@@ -10,7 +11,7 @@ const skillsDir = join(import.meta.dir, "../../../../skills")
 const sessions = new Map<string, Session>()
 
 export async function* POST(req: Request) {
-    const body = await req.json() as {
+    const body = await measure('Parse request', () => req.json()) as {
         message: string
         model?: string
         skills?: string[]
@@ -35,7 +36,9 @@ export async function* POST(req: Request) {
     }
 
     // Resolve skill paths
-    const skillPaths = (body.skills || []).map(s => join(skillsDir, `${s}.yaml`))
+    const skillPaths = measureSync('Resolve skill paths', () =>
+        (body.skills || []).map(s => join(skillsDir, `${s}.yaml`))
+    )!
 
     const config: AgentConfig = {
         model,
@@ -45,21 +48,25 @@ export async function* POST(req: Request) {
     }
 
     // Get or create session
-    let session: Session
-    if (body.sessionId && sessions.has(body.sessionId)) {
-        session = sessions.get(body.sessionId)!
-    } else {
-        session = new Session(config)
-        sessions.set(session.id, session)
-    }
+    const session = measureSync('Resolve session', () => {
+        if (body.sessionId && sessions.has(body.sessionId)) {
+            return sessions.get(body.sessionId)!
+        }
+        const s = new Session(config)
+        sessions.set(s.id, s)
+        return s
+    })!
 
     // Emit session ID so client can track it
     yield `event: session\ndata: ${JSON.stringify({ sessionId: session.id })}\n\n`
 
     try {
+        let eventCount = 0
         for await (const event of session.send(body.message)) {
+            eventCount++
             yield `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
         }
+        measureSync(`SSE complete (${eventCount} events)`)
         yield `event: done\ndata: {}\n\n`
     } catch (err: any) {
         console.error("[chat] Error:", err)
@@ -70,13 +77,16 @@ export async function* POST(req: Request) {
 
 // List available skills
 export async function GET() {
-    const skills: string[] = []
-    try {
-        for (const f of readdirSync(skillsDir)) {
-            if (f.endsWith(".yaml") || f.endsWith(".yml")) {
-                skills.push(f.replace(/\.(yaml|yml)$/, ""))
+    const skills = measureSync('List skills', () => {
+        const result: string[] = []
+        try {
+            for (const f of readdirSync(skillsDir)) {
+                if (f.endsWith(".yaml") || f.endsWith(".yml")) {
+                    result.push(f.replace(/\.(yaml|yml)$/, ""))
+                }
             }
-        }
-    } catch { }
+        } catch { }
+        return result
+    })
     return Response.json(skills)
 }

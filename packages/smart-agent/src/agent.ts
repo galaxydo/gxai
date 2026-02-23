@@ -1,6 +1,6 @@
 // smart-agent/src/agent.ts
 // Core agentic loop — iterates LLM + tools until all objectives pass
-import { measure } from "measure-fn"
+import { measure, measureSync } from "measure-fn"
 import type {
     AgentConfig,
     AgentEvent,
@@ -56,8 +56,10 @@ export class Agent {
         this.initialized = true
 
         if (this.config.skills && this.config.skills.length > 0) {
-            const skills = await loadSkills(this.config.skills)
-            this.skillsPrompt = formatSkillsForPrompt(skills)
+            await measure('Load skills', async () => {
+                const skills = await loadSkills(this.config.skills!)
+                this.skillsPrompt = formatSkillsForPrompt(skills)
+            })
         }
     }
 
@@ -209,7 +211,7 @@ export class Agent {
                 state.messages.push({ role: "assistant", content: llmResponse })
 
                 // ── Parse structured XML response ──
-                const parsed = this.parseResponse(llmResponse)
+                const parsed = measureSync('Parse XML response', () => this.parseResponse(llmResponse))!
 
                 if (parsed.message) {
                     yield { type: "thinking", iteration: i, message: parsed.message }
@@ -253,8 +255,8 @@ export class Agent {
                 }
 
                 // ── Check objectives ──
-                const objectiveResults = await this.checkObjectives(state)
-                yield { type: "objective_check", iteration: i, results: objectiveResults }
+                const objectiveResults = await measure('Check objectives', () => this.checkObjectives(state)) as Array<{ name: string; met: boolean; reason: string }>
+                yield { type: "objective_check", iteration: i, results: objectiveResults as Array<{ name: string; met: boolean; reason: string }> }
 
                 const allMet = objectiveResults.every(o => o.met)
 
@@ -291,6 +293,10 @@ export class Agent {
     // ── Internal ──
 
     private buildSystemPrompt(): string {
+        return measureSync('Build system prompt', () => this.buildSystemPromptInner())!
+    }
+
+    private buildSystemPromptInner(): string {
         const toolDescriptions = [...this.tools.values()]
             .map(t => {
                 const params = Object.entries(t.parameters)

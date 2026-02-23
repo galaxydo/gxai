@@ -1,6 +1,6 @@
 // smart-agent/src/session.ts
 // Multi-turn chat session — planner adjusts objectives per message, executor runs them
-import { measure } from "measure-fn"
+import { measure, measureSync } from "measure-fn"
 import type {
     AgentConfig,
     AgentEvent,
@@ -43,6 +43,7 @@ export class Session {
     private history: Message[] = []
     private plannerHistory: Array<{ role: string; content: string }> = []
     private currentObjectives: PlannedObjective[] = []
+    private turnCount = 0
 
     constructor(config: AgentConfig) {
         this.id = randomId()
@@ -59,6 +60,9 @@ export class Session {
      * objectives, then the executor will run.
      */
     async *send(message: string): AsyncGenerator<SessionEvent> {
+        this.turnCount++
+        const turn = this.turnCount
+
         // Track in user message history
         this.history.push({ role: "user", content: message })
 
@@ -72,7 +76,7 @@ export class Session {
 
         this.plannerHistory.push({ role: "user", content: plannerUserMsg })
 
-        const plannerResponse = await measure("Planner", () =>
+        const plannerResponse = await measure(`Planner (turn ${turn})`, () =>
             callLLM(this.config.model, this.plannerHistory, {
                 temperature: this.config.temperature ?? 0.3,
                 maxTokens: this.config.maxTokens ?? 4000,
@@ -80,21 +84,23 @@ export class Session {
         )
 
         // Parse objectives
-        let planned: PlannedObjective[]
-        try {
+        const planned = measureSync(`Parse objectives (turn ${turn})`, () => {
             let json = (plannerResponse || "").trim()
             if (json.startsWith("```")) {
                 json = json.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
             }
-            planned = JSON.parse(json)
-            if (!Array.isArray(planned) || planned.length === 0) {
+            const parsed: PlannedObjective[] = JSON.parse(json)
+            if (!Array.isArray(parsed) || parsed.length === 0) {
                 throw new Error("Empty objectives")
             }
-        } catch (e: any) {
+            return parsed
+        })
+
+        if (!planned) {
             yield {
                 type: "error",
                 iteration: -1,
-                error: `Planner failed: ${e.message}\nRaw: ${(plannerResponse || "").substring(0, 300)}`,
+                error: `Planner failed to parse objectives.\nRaw: ${(plannerResponse || "").substring(0, 300)}`,
             }
             return
         }
@@ -108,7 +114,9 @@ export class Session {
 
         // ── Stage 2: Executor — run with generated objectives ──
         const cwd = this.config.cwd ?? process.cwd()
-        const objectives = planned.map(p => hydrateObjective(p, cwd))
+        const objectives = measureSync(`Hydrate objectives (turn ${turn})`, () =>
+            planned.map(p => hydrateObjective(p, cwd))
+        )!
 
         const agent = new Agent({
             ...this.config,
