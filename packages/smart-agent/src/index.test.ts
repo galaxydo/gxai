@@ -120,10 +120,10 @@ commands:
 describe("Tools", () => {
     const tmpDir = join(process.cwd(), ".test-tools-tmp")
 
-    test("creates 7 built-in tools", () => {
+    test("creates 6 built-in tools", () => {
         const tools = createBuiltinTools("/tmp", 5000)
-        expect(tools.length).toBe(7)
-        expect(tools.map(t => t.name)).toEqual(["read_file", "write_file", "edit_file", "exec", "list_dir", "search", "schedule"])
+        expect(tools.length).toBe(6)
+        expect(tools.map(t => t.name)).toEqual(["read_file", "write_file", "edit_file", "exec", "list_dir", "search"])
     })
 
     test("read_file reads existing file", async () => {

@@ -4,7 +4,6 @@ export { Session } from "./session"
 export type { SessionEvent } from "./session"
 export { hydrateObjective } from "./objectives"
 export { callLLM, streamLLM } from "./llm"
-export { listTasks, getTask, removeTask, scheduleTask } from "./scheduler"
 export type {
     AgentConfig,
     AgentEvent,

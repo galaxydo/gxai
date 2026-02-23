@@ -1,8 +1,7 @@
 // smart-agent/src/tools.ts
-// 7 built-in tools: read_file, write_file, edit_file, exec, list_dir, search, schedule
+// 6 built-in tools: read_file, write_file, edit_file, exec, list_dir, search
 import type { Tool, ToolResult } from "./types"
 import { measure, measureSync } from "measure-fn"
-import { scheduleTask, removeTask, listTasks } from "./scheduler"
 
 function resolvePath(cwd: string, filePath: string): string {
     if (!filePath || typeof filePath !== "string") throw new Error("Path is required")
@@ -251,71 +250,6 @@ export function createBuiltinTools(cwd: string, timeoutMs: number): Tool[] {
                 if (matches.length === 0) return { success: true, output: `No matches for "${pattern}"` }
                 const suffix = matches.length >= maxMatches ? `\n...[capped at ${maxMatches} matches]` : ""
                 return { success: true, output: matches.join("\n") + suffix }
-            }, (e: any) => ({ success: false, output: "", error: e.message })) as Promise<ToolResult>,
-        },
-
-        // ── schedule ──
-        {
-            name: "schedule",
-            description: "Schedule a script to run on a repeating interval. Use action='create' to schedule, 'list' to see all tasks, 'remove' to cancel. The script must already exist as a file.",
-            parameters: {
-                action: { type: "string", description: "One of: create, list, remove", required: true },
-                name: { type: "string", description: "Human-readable task name (for create)", required: false },
-                script_path: { type: "string", description: "Path to the script file to execute (for create)", required: false },
-                interval_seconds: { type: "number", description: "Interval in seconds between runs (for create, minimum 10)", required: false },
-                task_id: { type: "string", description: "Task ID to remove (for remove)", required: false },
-            },
-            execute: (params) => measure('tool:schedule', async () => {
-                const action = params.action || "list"
-
-                if (action === "list") {
-                    const tasks = listTasks()
-                    if (tasks.length === 0) return { success: true, output: "No scheduled tasks." }
-                    const lines = tasks.map(t => {
-                        const next = new Date(t.nextRun).toLocaleTimeString()
-                        const last = t.lastRun ? new Date(t.lastRun).toLocaleTimeString() : "never"
-                        const status = t.lastResult
-                            ? (t.lastResult.success ? "✓" : `✗ ${t.lastResult.error || ""}`)
-                            : "pending"
-                        return `[${t.id}] ${t.name} — every ${t.intervalSec}s — next: ${next} — last: ${last} — ${status}\n  script: ${t.scriptPath}`
-                    })
-                    return { success: true, output: lines.join("\n\n") }
-                }
-
-                if (action === "create") {
-                    if (!params.script_path) return { success: false, output: "", error: "script_path is required" }
-                    if (!params.name) return { success: false, output: "", error: "name is required" }
-                    const interval = Number(params.interval_seconds) || 60
-                    if (interval < 10) return { success: false, output: "", error: "interval_seconds must be at least 10" }
-
-                    const fullPath = resolvePath(cwd, params.script_path)
-                    const file = Bun.file(fullPath)
-                    if (!(await file.exists())) {
-                        return { success: false, output: "", error: `Script not found: ${fullPath}. Create it first with write_file.` }
-                    }
-
-                    const task = scheduleTask({
-                        name: params.name,
-                        scriptPath: fullPath,
-                        intervalSec: interval,
-                        cwd,
-                    })
-
-                    return {
-                        success: true,
-                        output: `Scheduled "${task.name}" (${task.id})\n  script: ${task.scriptPath}\n  interval: every ${task.intervalSec}s\n  next run: ${new Date(task.nextRun).toLocaleTimeString()}`,
-                    }
-                }
-
-                if (action === "remove") {
-                    if (!params.task_id) return { success: false, output: "", error: "task_id is required" }
-                    const removed = removeTask(params.task_id)
-                    return removed
-                        ? { success: true, output: `Removed task ${params.task_id}` }
-                        : { success: false, output: "", error: `Task not found: ${params.task_id}` }
-                }
-
-                return { success: false, output: "", error: `Unknown action: ${action}. Use create, list, or remove.` }
             }, (e: any) => ({ success: false, output: "", error: e.message })) as Promise<ToolResult>,
         },
     ]
