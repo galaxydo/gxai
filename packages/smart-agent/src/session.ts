@@ -44,6 +44,7 @@ export class Session {
     private plannerHistory: Array<{ role: string; content: string }> = []
     private currentObjectives: PlannedObjective[] = []
     private turnCount = 0
+    private abortController: AbortController | null = null
 
     constructor(config: AgentConfig) {
         this.id = randomId()
@@ -129,7 +130,10 @@ export class Session {
             content: m.content,
         }))
 
-        for await (const event of agent.run(executorInput)) {
+        // Reset abort controller for this turn
+        this.abortController = new AbortController()
+
+        for await (const event of agent.run(executorInput, this.abortController.signal)) {
             yield event
 
             // Track completion in history
@@ -139,6 +143,14 @@ export class Session {
                     content: `Completed objectives: ${planned.map(p => p.name).join(", ")}`,
                 })
             }
+        }
+    }
+
+    /** Abort the currently running agent loop */
+    abort() {
+        if (this.abortController) {
+            this.abortController.abort()
+            this.abortController = null
         }
     }
 

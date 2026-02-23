@@ -79,7 +79,7 @@ export class Agent {
      * ])) {}
      * ```
      */
-    async *run(input: string | Message[]): AsyncGenerator<AgentEvent> {
+    async *run(input: string | Message[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {
         if (this.objectives.length === 0) {
             throw new Error("No objectives defined. Use Agent.plan() for dynamic objective generation, or pass objectives in the constructor.")
         }
@@ -111,7 +111,7 @@ export class Agent {
             }
         }
 
-        yield* this.executeLoop(state, startTime)
+        yield* this.executeLoop(state, startTime, signal)
     }
 
     /**
@@ -184,8 +184,14 @@ export class Agent {
 
     // ── Core loop (shared by run + plan) ──
 
-    private async *executeLoop(state: AgentState, startTime: number): AsyncGenerator<AgentEvent> {
+    private async *executeLoop(state: AgentState, startTime: number, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
         for (let i = 0; i < this.config.maxIterations; i++) {
+            // Check abort before each iteration
+            if (signal?.aborted) {
+                yield { type: "cancelled", iteration: i, elapsed: Date.now() - startTime }
+                return
+            }
+
             state.iteration = i
             yield { type: "iteration_start", iteration: i, elapsed: Date.now() - startTime }
 

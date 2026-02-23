@@ -10,6 +10,19 @@ const skillsDir = join(import.meta.dir, "../../../../skills")
 // In-memory session store (keyed by session ID)
 const sessions = new Map<string, Session>()
 
+/** DELETE /api/chat?sessionId=x — abort a running session */
+export async function DELETE(req: Request) {
+    const url = new URL(req.url)
+    const sessionId = url.searchParams.get("sessionId")
+    if (!sessionId) return Response.json({ error: "Missing sessionId" }, { status: 400 })
+
+    const session = sessions.get(sessionId)
+    if (!session) return Response.json({ error: "Session not found" }, { status: 404 })
+
+    session.abort()
+    return Response.json({ ok: true })
+}
+
 export async function POST(req: Request) {
     const body = await measure('Parse request', () => req.json()) as {
         message: string

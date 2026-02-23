@@ -117,7 +117,10 @@ export default function mount() {
         }
     })
 
-    sendBtn.addEventListener('click', sendMessage)
+    sendBtn.addEventListener('click', () => {
+        if (state.isRunning) stopAgent()
+        else sendMessage()
+    })
 
     // Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -366,7 +369,7 @@ async function sendMessage() {
     state.isRunning = true
     agent.status = 'running'
     agentStatusDot.className = 'agent-status-dot active'
-    sendBtn.setAttribute('disabled', 'true')
+    setSendButtonMode('stop')
     inputEl.value = ''
     inputEl.style.height = 'auto'
     renderSidebar()
@@ -438,9 +441,31 @@ async function sendMessage() {
     state.isRunning = false
     agent.status = 'idle'
     agentStatusDot.className = 'agent-status-dot'
-    sendBtn.removeAttribute('disabled')
+    setSendButtonMode('send')
     inputEl.focus()
     renderSidebar()
+}
+
+// ── Send/Stop Button ──
+
+function setSendButtonMode(mode: 'send' | 'stop') {
+    if (mode === 'stop') {
+        sendBtn.classList.add('stop-mode')
+        sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+        sendBtn.title = 'Stop agent'
+    } else {
+        sendBtn.classList.remove('stop-mode')
+        sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>'
+        sendBtn.title = 'Send message'
+    }
+}
+
+async function stopAgent() {
+    const agent = getActiveAgent()
+    if (!agent?.sessionId || !state.isRunning) return
+    try {
+        await fetch(`/api/chat?sessionId=${agent.sessionId}`, { method: 'DELETE' })
+    } catch { /* ignore */ }
 }
 
 // ══════════════════════════════════════
@@ -573,6 +598,22 @@ function handleEvent(type: string, data: any) {
                 appendResponseBubble(lastThinkingMessage)
             }
             appendCard('error', 'Reached Limit', `Stopped after ${data.iteration} iterations. Try rephrasing your request or breaking it into smaller steps.`)
+            lastThinkingMessage = ''
+            lastThinkingEl = null
+            break
+        }
+        case 'cancelled': {
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
+            if (lastThinkingMessage) {
+                if (lastThinkingEl) lastThinkingEl.remove()
+                appendResponseBubble(lastThinkingMessage)
+            }
+            const elapsed = ((data.elapsed || 0) / 1000).toFixed(1)
+            appendCard('cancelled', '■ Cancelled', `Stopped after ${(data.iteration || 0) + 1} iteration${data.iteration > 0 ? 's' : ''} · ${elapsed}s`)
             lastThinkingMessage = ''
             lastThinkingEl = null
             break
