@@ -103,6 +103,10 @@ export default function mount() {
     // Settings button
     document.getElementById('settings-btn')!.addEventListener('click', openSettings)
 
+    // Header action buttons
+    document.getElementById('export-chat-btn')!.addEventListener('click', exportChatAsMarkdown)
+    document.getElementById('clear-chat-btn')!.addEventListener('click', clearCurrentChat)
+
     // Auto-resize textarea
     inputEl.addEventListener('input', () => {
         inputEl.style.height = 'auto'
@@ -374,6 +378,56 @@ function clearCurrentChat() {
     renderSidebar()
     saveState()
     inputEl.focus()
+}
+
+function exportChatAsMarkdown() {
+    if (!state.activeAgentId) return
+    const agent = getActiveAgent()
+    const agentName = agent?.name || 'agent'
+    const lines: string[] = [`# Chat: ${agentName}`, `_Exported ${new Date().toLocaleString()}_`, '']
+
+    // Walk through chat DOM children
+    for (const child of Array.from(chatArea.children)) {
+        const el = child as HTMLElement
+
+        // User message
+        if (el.classList.contains('msg') && el.classList.contains('msg-user')) {
+            const text = el.querySelector('.bubble')?.textContent?.trim() || ''
+            lines.push(`## 👤 User`, '', text, '')
+            continue
+        }
+
+        // Agent response
+        if (el.classList.contains('msg') && el.classList.contains('msg-agent')) {
+            const text = el.querySelector('.bubble')?.textContent?.trim() || ''
+            lines.push(`## 🤖 Agent`, '', text, '')
+            continue
+        }
+
+        // Cards (complete, error, planning, etc.)
+        const card = el.querySelector?.('.card') as HTMLElement | null
+        if (card) {
+            const label = card.querySelector('.card-label')?.textContent?.trim() || ''
+            const content = card.querySelector('.card-content')?.textContent?.trim() || ''
+            lines.push(`> **${label}**`, `> ${content}`, '')
+            continue
+        }
+
+        // Dividers
+        if (el.classList.contains('divider')) {
+            lines.push(`---`, `*${el.textContent?.trim()}*`, '')
+            continue
+        }
+    }
+
+    // Download as .md file
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${agentName.replace(/[^a-zA-Z0-9]/g, '_')}_chat.md`
+    a.click()
+    URL.revokeObjectURL(url)
 }
 
 function getActiveAgent(): AgentEntry | null {
@@ -1186,9 +1240,10 @@ function SettingsModal() {
                         <span className="settings-label">Keyboard Shortcuts</span>
                         <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
                             <div className="settings-kbd"><span className="kbd">Ctrl+N</span> New agent</div>
+                            <div className="settings-kbd"><span className="kbd">Ctrl+L</span> Clear chat</div>
                             <div className="settings-kbd"><span className="kbd">Enter</span> Send message</div>
                             <div className="settings-kbd"><span className="kbd">Shift+Enter</span> New line</div>
-                            <div className="settings-kbd"><span className="kbd">Esc</span> Close modal</div>
+                            <div className="settings-kbd"><span className="kbd">Esc</span> Stop agent / Close modal</div>
                         </div>
                     </div>
                 </div>

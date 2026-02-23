@@ -28,6 +28,10 @@ export default function Page() {
                         <span className="agent-status-dot active" id="agent-status-dot" />
                         <span className="agent-header-name" id="agent-header-name">Select or create an agent</span>
                     </div>
+                    <div className="agent-header-actions">
+                        <button className="header-icon-btn" id="export-chat-btn" title="Export chat as Markdown">⬇</button>
+                        <button className="header-icon-btn" id="clear-chat-btn" title="Clear chat (Ctrl+L)">🗑</button>
+                    </div>
                     <div className="agent-header-right">
                         <select className="model-select" id="model-select">
                             <option value="gemini-2.5-flash">gemini-2.5-flash</option>

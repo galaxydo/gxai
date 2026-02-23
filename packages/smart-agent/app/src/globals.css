@@ -25,6 +25,8 @@
     --red: #ef4444;
     --amber: #f59e0b;
     --blue: #3b82f6;
+    --purple: #a78bfa;
+    --purple-light: #c4b5fd;
     --r: 12px;
     --r-sm: 8px;
     --sidebar-w: 240px;
@@ -252,6 +254,35 @@ body {
     display: flex;
     align-items: center;
     gap: 12px;
+}
+
+.agent-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    margin-right: 12px;
+}
+
+.header-icon-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-3);
+    font-size: 14px;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .15s;
+}
+
+.header-icon-btn:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
+    border-color: var(--border);
 }
 
 .model-select {
