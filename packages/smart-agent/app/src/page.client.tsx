@@ -5,7 +5,7 @@ import { openSettings, closeSettings } from './lib/settings'
 import { switchTab } from './lib/panels'
 import {
     createAgent, deleteAgent, clearCurrentChat, exportChatAsMarkdown,
-    sendMessage, stopAgent, loadSkills, restoreState, setupResizeHandle,
+    sendMessage, stopAgent, loadSkills, loadModels, restoreState, setupResizeHandle,
     renderSidebar,
 } from './lib/agents'
 
@@ -14,8 +14,9 @@ configure({ timestamps: true })
 export default function mount() {
     initDom()
 
-    // Load skills
+    // Load skills and models
     loadSkills()
+    loadModels()
 
     // Tab switching
     document.getElementById('tab-bar')!.addEventListener('click', (e) => {

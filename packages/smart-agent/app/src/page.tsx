@@ -34,14 +34,8 @@ export default function Page() {
                     </div>
                     <div className="agent-header-right">
                         <select className="model-select" id="model-select">
+                            {/* Populated dynamically from /api/models — only active providers */}
                             <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                            <option value="gemini-3-flash-preview">gemini-3-flash</option>
-                            <option value="gemini-3-pro-preview">gemini-3-pro</option>
-                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                            <option value="claude-sonnet-4-20250514">claude-sonnet-4</option>
-                            <option value="gpt-4o">gpt-4o</option>
-                            <option value="deepseek-chat">deepseek</option>
                         </select>
                         <div id="skill-toggles" className="skill-toggles" />
                     </div>

@@ -379,6 +379,57 @@ export async function loadSkills() {
     })
 }
 
+/** Populate model-select from /api/models — only active providers' models */
+export async function loadModels() {
+    try {
+        const providers: any[] = await fetch('/api/models').then(r => r.json())
+        const select = dom.modelSelect
+        const currentValue = select.value
+
+        // Clear existing options
+        select.innerHTML = ''
+
+        // Active providers first, then inactive (disabled)
+        const active = providers.filter(p => p.active)
+        const inactive = providers.filter(p => !p.active)
+
+        for (const p of active) {
+            const group = document.createElement('optgroup')
+            group.label = p.name
+            for (const m of p.models) {
+                const opt = document.createElement('option')
+                opt.value = m.id
+                opt.textContent = m.name
+                group.appendChild(opt)
+            }
+            select.appendChild(group)
+        }
+
+        if (inactive.length > 0) {
+            const group = document.createElement('optgroup')
+            group.label = '── Not configured ──'
+            for (const p of inactive) {
+                for (const m of p.models) {
+                    const opt = document.createElement('option')
+                    opt.value = m.id
+                    opt.textContent = `${m.name} (needs ${p.envKey})`
+                    opt.disabled = true
+                    group.appendChild(opt)
+                }
+            }
+            select.appendChild(group)
+        }
+
+        // Restore previous selection if still valid
+        if (currentValue) {
+            const exists = select.querySelector(`option[value="${currentValue}"]`) as HTMLOptionElement
+            if (exists && !exists.disabled) select.value = currentValue
+        }
+    } catch (e) {
+        console.error('Failed to load models:', e)
+    }
+}
+
 export function renderSkillChips() {
     const container = document.getElementById('skill-toggles')
     if (!container) return

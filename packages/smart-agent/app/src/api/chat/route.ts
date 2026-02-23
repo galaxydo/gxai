@@ -6,6 +6,9 @@ import { addMessage } from "../../../../src/db"
 import { join } from "path"
 import { readdirSync } from "fs"
 
+// Ensure saved API keys are loaded into process.env
+import '../models/route'
+
 const skillsDir = join(import.meta.dir, "../../../../skills")
 
 // In-memory session store (keyed by session ID)
