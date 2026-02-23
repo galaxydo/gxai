@@ -16,6 +16,7 @@ export type SessionEvent =
     | AgentEvent
     | { type: "session_start"; sessionId: string }
     | { type: "replanning"; message: string }
+    | { type: "awaiting_confirmation"; objectives: PlannedObjective[] }
 
 /**
  * A multi-turn chat session. Each user message goes through a pipeline:
@@ -45,10 +46,15 @@ export class Session {
     private currentObjectives: PlannedObjective[] = []
     private turnCount = 0
     private abortController: AbortController | null = null
+    readonly requireConfirmation: boolean
 
-    constructor(config: AgentConfig) {
+    // Confirmation gate — resolves when user confirms or rejects
+    private confirmationResolve: ((confirmed: boolean) => void) | null = null
+
+    constructor(config: AgentConfig & { requireConfirmation?: boolean }) {
         this.id = randomId()
         this.config = config
+        this.requireConfirmation = config.requireConfirmation ?? true
 
         // Initialize planner with system prompt
         this.plannerHistory = [
@@ -113,6 +119,21 @@ export class Session {
         // Emit planning event
         yield { type: "planning", objectives: planned }
 
+        // ── Confirmation gate — pause and wait for user confirmation ──
+        if (this.requireConfirmation) {
+            yield { type: "awaiting_confirmation", objectives: planned }
+
+            const confirmed = await new Promise<boolean>(resolve => {
+                this.confirmationResolve = resolve
+            })
+
+            if (!confirmed) {
+                this.history.push({ role: "assistant", content: "Objectives rejected by user." })
+                yield { type: "error", iteration: -1, error: "User rejected the proposed objectives." }
+                return
+            }
+        }
+
         // ── Stage 2: Executor — run with generated objectives ──
         const cwd = this.config.cwd ?? process.cwd()
         const objectives = measureSync(`Hydrate objectives (turn ${turn})`, () =>
@@ -146,12 +167,35 @@ export class Session {
         }
     }
 
+    /** Confirm objectives and proceed with execution */
+    confirmObjectives() {
+        if (this.confirmationResolve) {
+            this.confirmationResolve(true)
+            this.confirmationResolve = null
+        }
+    }
+
+    /** Reject objectives — stops execution for this turn */
+    rejectObjectives() {
+        if (this.confirmationResolve) {
+            this.confirmationResolve(false)
+            this.confirmationResolve = null
+        }
+    }
+
+    /** Whether the session is waiting for user confirmation */
+    get isAwaitingConfirmation(): boolean {
+        return this.confirmationResolve !== null
+    }
+
     /** Abort the currently running agent loop */
     abort() {
         if (this.abortController) {
             this.abortController.abort()
             this.abortController = null
         }
+        // Also reject any pending confirmation
+        this.rejectObjectives()
     }
 
     /** Get the current session history */
