@@ -151,7 +151,81 @@ export default function mount() {
     // Overview resize
     setupResizeHandle()
 
+    // Restore persisted state
+    restoreState()
+
     return () => { }
+}
+
+// ══════════════════════════════════════
+// PERSISTENCE (localStorage)
+// ══════════════════════════════════════
+
+const LS_KEY = 'smart-agent-state'
+
+function saveState() {
+    try {
+        // Snapshot current agent's chat before saving
+        if (state.activeAgentId) {
+            agentChatStore.set(state.activeAgentId, {
+                html: chatArea.innerHTML,
+                objectives: [...state.objectives],
+                files: [...state.files],
+                toolCards: [...toolCards],
+            })
+        }
+
+        const data: any = {
+            agents: state.agents,
+            activeAgentId: state.activeAgentId,
+            chats: {} as Record<string, { html: string; objectives: any[]; files: any[] }>,
+        }
+
+        for (const [id, chat] of agentChatStore) {
+            data.chats[id] = {
+                html: chat.html,
+                objectives: chat.objectives,
+                files: chat.files,
+            }
+        }
+
+        localStorage.setItem(LS_KEY, JSON.stringify(data))
+    } catch { /* quota exceeded or private mode */ }
+}
+
+function restoreState() {
+    try {
+        const raw = localStorage.getItem(LS_KEY)
+        if (!raw) return
+
+        const data = JSON.parse(raw)
+        if (!data.agents?.length) return
+
+        // Restore agents
+        state.agents = data.agents.map((a: any) => ({
+            ...a,
+            status: 'idle' as const, // reset to idle on reload
+        }))
+
+        // Restore per-agent chat state into the store
+        if (data.chats) {
+            for (const [id, chat] of Object.entries(data.chats as Record<string, any>)) {
+                agentChatStore.set(id, {
+                    html: chat.html || '',
+                    objectives: chat.objectives || [],
+                    files: chat.files || [],
+                    toolCards: [], // can't serialize DOM elements
+                })
+            }
+        }
+
+        // Select the previously active agent
+        if (data.activeAgentId && state.agents.some((a: AgentEntry) => a.id === data.activeAgentId)) {
+            selectAgent(data.activeAgentId)
+        } else if (state.agents.length > 0) {
+            selectAgent(state.agents[0].id)
+        }
+    } catch { /* corrupted data, ignore */ }
 }
 
 // ══════════════════════════════════════
@@ -170,6 +244,7 @@ function createAgent() {
     state.agents.push(agent)
     selectAgent(id)
     renderSidebar()
+    saveState()
 }
 
 function deleteAgent(id: string) {
@@ -208,6 +283,7 @@ function deleteAgent(id: string) {
         }
     }
     renderSidebar()
+    saveState()
 }
 
 function selectAgent(id: string) {
@@ -259,6 +335,7 @@ function selectAgent(id: string) {
     renderFilesPane()
     renderSchedulePane()
     renderSidebar()
+    saveState()
 }
 
 function getActiveAgent(): AgentEntry | null {
@@ -444,6 +521,7 @@ async function sendMessage() {
     setSendButtonMode('send')
     inputEl.focus()
     renderSidebar()
+    saveState()
 }
 
 // ── Send/Stop Button ──
