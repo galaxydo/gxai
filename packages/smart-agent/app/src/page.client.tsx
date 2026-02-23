@@ -281,9 +281,9 @@ async function restoreState() {
             model: a.model,
         }))
 
-        // Select first agent
+        // Select first agent and load its history
         if (state.agents.length > 0) {
-            selectAgent(state.agents[0].id)
+            await selectAgent(state.agents[0].id)
         }
     } catch { /* first load, no agents yet */ }
 }
@@ -357,7 +357,7 @@ async function deleteAgent(id: number) {
     saveState()
 }
 
-function selectAgent(id: number) {
+async function selectAgent(id: number) {
     const prev = state.activeAgentId
 
     // Save current agent's chat state before switching
@@ -378,7 +378,7 @@ function selectAgent(id: number) {
     agentHeaderName.textContent = agent.name
     agentStatusDot.className = `agent-status-dot ${agent.status === 'running' ? 'active' : ''}`
 
-    // Restore saved chat for this agent, or clear
+    // Restore saved chat for this agent
     const saved = agentChatStore.get(id)
     if (saved) {
         chatArea.innerHTML = saved.html
@@ -395,10 +395,42 @@ function selectAgent(id: number) {
             }
         })
     } else {
+        // No in-memory cache — try loading from DB
         chatArea.innerHTML = ''
         state.objectives = []
         state.files = []
         toolCards.length = 0
+        try {
+            const data = await fetch(`/api/state?agentId=${id}`).then(r => r.json())
+            if (data.messages?.length) {
+                // Remove empty state if present
+                const empty = document.getElementById('empty-state')
+                if (empty) empty.remove()
+                // Reconstruct chat from stored messages
+                for (const msg of data.messages) {
+                    if (msg.role === 'user') {
+                        appendUserBubble(msg.content)
+                    } else if (msg.role === 'assistant' && msg.content) {
+                        appendResponseBubble(msg.content)
+                    }
+                }
+            }
+            if (data.objectives?.length) {
+                state.objectives = data.objectives.map((o: any) => ({
+                    name: o.name,
+                    description: o.description,
+                    type: o.status,
+                    met: o.status === 'complete' ? true : o.status === 'failed' ? false : undefined,
+                    reason: o.result,
+                }))
+            }
+            if (data.files?.length) {
+                state.files = data.files.map((f: any) => ({
+                    path: f.path,
+                    action: f.action === 'modified' ? 'write' as const : 'read' as const,
+                }))
+            }
+        } catch { /* fresh agent, no state yet */ }
     }
 
     state.schedules = []
@@ -421,6 +453,14 @@ function clearCurrentChat() {
     toolCards.length = 0
     agent.sessionId = null
     agentChatStore.delete(agent.id)
+
+    // Clear server-side state
+    fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear', agentId: agent.id }),
+    }).catch(() => { })
+
     renderObjectivesPane()
     renderFilesPane()
     renderSidebar()
