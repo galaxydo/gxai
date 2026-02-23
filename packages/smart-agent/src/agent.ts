@@ -359,11 +359,13 @@ RULES:
 1. Use available tools to make progress toward ALL objectives
 2. You can invoke multiple tools per turn
 3. Be precise with file paths and command syntax
-4. Learn from tool errors — adjust your approach
-5. When writing code, ensure it is correct and complete
-6. Keep messages concise but informative
-7. If the objective just asks for a response (explanation, joke, advice), put your answer in the <message> tag — no tools needed
-8. On Windows, use 'dir' instead of 'ls', and 'type' instead of 'cat'`
+4. Learn from tool errors — NEVER repeat the exact same failing tool call
+5. If a tool fails twice, try an alternative approach or explain why it can't be done
+6. When writing code, ensure it is correct and complete
+7. Keep messages concise but informative
+8. If the objective just asks for a response (explanation, joke, advice), put your answer in the <message> tag — no tools needed
+9. On Windows, use PowerShell commands: 'Get-ChildItem' not 'ls', 'Get-Content' not 'cat'
+10. If you cannot make progress, explain the blocker in <message> — do NOT repeat failed actions`
     }
 
     private parseResponse(raw: string): {
