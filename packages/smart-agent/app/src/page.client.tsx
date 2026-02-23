@@ -101,20 +101,10 @@ export default function mount() {
     // New agent button
     document.getElementById('new-agent-btn')!.addEventListener('click', createAgent)
 
-    // Settings buttons (both sidebar and nav rail)
+    // Settings button (sidebar only — nav rail settings is handled by layout.client.tsx)
     document.getElementById('settings-btn')!.addEventListener('click', openSettings)
-    document.getElementById('nav-settings-btn')!.addEventListener('click', openSettings)
-
-    // Nav rail page switching
-    document.querySelectorAll('.nav-rail-btn[data-page]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.nav-rail-btn').forEach(b => b.classList.remove('active'))
-            btn.classList.add('active')
-            const page = (btn as HTMLElement).dataset.page
-            if (page === 'settings') openSettings()
-            // Other pages TBD
-        })
-    })
+    // Listen for settings event from nav rail (via layout.client.tsx)
+    window.addEventListener('smart-agent:open-settings', openSettings)
 
     // Header action buttons
     document.getElementById('export-chat-btn')!.addEventListener('click', exportChatAsMarkdown)

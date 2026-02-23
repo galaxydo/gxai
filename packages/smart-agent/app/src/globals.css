@@ -45,16 +45,257 @@ body {
 }
 
 /* ══════════════════════════════════════
-   WORKSPACE GRID
+   APP SHELL GRID (nav-rail in layout, page content wrapped by Melina)
    ══════════════════════════════════════ */
-.workspace {
+.app-shell {
     display: grid;
     grid-template-columns: var(--nav-rail-w) var(--sidebar-w) 1fr;
     height: 100vh;
     width: 100vw;
 }
 
-/* Settings modal lives inside workspace but must not affect grid */
+/* Melina wraps {children} in #melina-page-content — make it transparent to grid */
+#melina-page-content {
+    display: contents;
+}
+
+/* The agents page wrapper also needs to be transparent to the grid */
+.agents-page {
+    display: contents;
+}
+
+/* Sub-pages (models, skills, plugins) don't have a sidebar — span full width */
+.page-container {
+    grid-column: 2 / -1;
+    padding: 40px 48px;
+    overflow-y: auto;
+    background: var(--bg-1);
+}
+
+.page-header {
+    margin-bottom: 32px;
+}
+
+.page-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.page-subtitle {
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ── Model Cards ── */
+.model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.model-card {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 20px;
+    transition: border-color .15s, box-shadow .15s;
+}
+
+.model-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.model-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.model-card-title h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.model-provider {
+    font-size: 11px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.tier-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tier-recommended {
+    background: linear-gradient(135deg, rgba(99, 102, 241, .2), rgba(167, 139, 250, .2));
+    color: var(--purple-light);
+    border: 1px solid rgba(167, 139, 250, .3);
+}
+
+.tier-pro {
+    background: rgba(59, 130, 246, .12);
+    color: var(--blue);
+    border: 1px solid rgba(59, 130, 246, .2);
+}
+
+.tier-preview {
+    background: rgba(245, 158, 11, .12);
+    color: var(--amber);
+    border: 1px solid rgba(245, 158, 11, .2);
+}
+
+.tier-stable {
+    background: rgba(34, 197, 94, .12);
+    color: var(--green);
+    border: 1px solid rgba(34, 197, 94, .2);
+}
+
+.model-card-desc {
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+.model-card-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-3);
+    background: var(--bg-0);
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+/* ── Skills List ── */
+.skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skill-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 16px 20px;
+    transition: border-color .15s;
+}
+
+.skill-row:hover {
+    border-color: var(--border-focus);
+}
+
+.skill-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    width: 40px;
+    text-align: center;
+}
+
+.skill-info {
+    flex: 1;
+}
+
+.skill-info h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+
+.skill-info p {
+    font-size: 12px;
+    color: var(--text-2);
+    line-height: 1.4;
+}
+
+.skill-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.skill-badge.builtin {
+    background: rgba(34, 197, 94, .12);
+    color: var(--green);
+    border: 1px solid rgba(34, 197, 94, .2);
+}
+
+.skill-badge.optional {
+    background: rgba(99, 102, 241, .12);
+    color: var(--accent);
+    border: 1px solid rgba(99, 102, 241, .2);
+}
+
+/* ── Coming Soon (Plugins) ── */
+.coming-soon {
+    text-align: center;
+    padding: 60px 40px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.coming-soon-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.coming-soon h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.coming-soon>p {
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 32px;
+}
+
+.coming-soon-features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.feature-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+.feature-icon {
+    font-size: 18px;
+}
+
+/* Settings modal lives inside app-shell but must not affect grid */
 .settings-modal-container {
     display: contents;
 }
