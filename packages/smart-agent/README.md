@@ -1,6 +1,30 @@
 # smart-agent
 
-Autonomous agentic loop with Skills + Objectives. Give it tools, goals, and a prompt — it loops until done.
+Autonomous agentic loop with Skills + Objectives for Bun.
+
+```
+            ┌──────────────────────────────────────┐
+            │         Objectives (WHAT)            │
+            │  Blackbox validate() functions that   │
+            │  define success criteria             │
+            └────────────┬─────────────────────────┘
+                         │
+  prompt ──→  LLM ──→ exec tool ──→ check objectives ──→ loop
+                ↑                        │
+                │                        ↓
+            ┌───┴──────────┐     ┌──────────────┐
+            │ Skills (CTX) │     │ Met? → done  │
+            │ YAML files   │     │ Not? → retry │
+            │ teach CLIs   │     └──────────────┘
+            └──────────────┘
+```
+
+- **Objectives** = WHAT to achieve — blackbox `validate()` functions that return `{ met, reason }`
+- **Skills** = CONTEXT — YAML files the LLM reads to learn available CLIs (`git`, `bun`, `docker`, your project scripts)
+- **Tools** = HOW to interact — built-in `exec`, `read_file`, `write_file`, `edit_file`, `search`, `list_dir`
+- **`agent.run(prompt)`** = the trigger that kicks off the loop
+
+The agent doesn't "know" git or bun — **skills teach it**. Validation errors are passed back to the LLM so it knows how to adjust.
 
 ## Install
 
@@ -13,21 +37,24 @@ bun add smart-agent
 ```ts
 import { Agent } from "smart-agent"
 
-// Predefined objectives
 const agent = new Agent({
   model: "gemini-2.5-flash",
+  // Skills teach the agent what CLIs are available
+  skills: ["./skills/bun.yaml", "./skills/git.yaml"],
+  // Objectives define success — blackbox validation
   objectives: [{
-    name: "file_exists",
-    description: "Create hello.txt with 'Hello World'",
-    validate: async () => {
-      const f = Bun.file("hello.txt")
-      if (!(await f.exists())) return { met: false, reason: "File missing" }
-      return { met: (await f.text()).includes("Hello"), reason: "OK" }
+    name: "tests_pass",
+    description: "All unit tests pass",
+    validate: (state) => {
+      const last = state.toolHistory.findLast(t => t.tool === "exec" && t.params.command?.includes("bun test"))
+      if (!last) return { met: false, reason: "Run 'bun test' first" }
+      return { met: last.result.success, reason: last.result.success ? "Tests pass" : "Tests fail" }
     }
   }],
 })
 
-for await (const event of agent.run("Create hello.txt")) {
+// agent.run() is the trigger — skills give it context on how to proceed
+for await (const event of agent.run("Fix the failing tests")) {
   console.log(event.type, event)
 }
 ```
@@ -261,14 +288,15 @@ Run any example with `bun run examples/<name>.ts`:
 
 | Example | What it does |
 |---------|--------------|
-| `hello` | Creates a file — simplest possible agent |
-| `planner` | `Agent.plan()` — generates objectives from natural language |
-| `scaffold` | Multi-objective — creates project, writes tests, makes them pass |
+| **`skill-driven`** | ⭐ The canonical pattern — skills provide CLI context, agent fixes lint/format/type errors |
 | `code-review` | Finds and fixes bugs in a deliberately broken file |
 | `refactor` | Splits a monolithic file into clean modules |
 | `api-gen` | Generates a REST API from a spec, writes tests, verifies them |
 | `session` | Multi-turn Session with objective confirmation/rejection |
 | `custom-tools` | Extends the agent with `http_get` and `json_transform` tools |
+| `scaffold` | Multi-objective — creates project, writes tests, makes them pass |
+| `planner` | `Agent.plan()` — generates objectives from natural language |
+| `hello` | Creates a file — simplest possible agent |
 
 ```bash
 export GEMINI_API_KEY=your-key
