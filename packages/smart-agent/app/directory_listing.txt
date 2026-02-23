@@ -1,0 +1,13 @@
+Volume in drive C has no label.
+Volume Serial Number is DCB0-0025
+
+ Directory of c:\Code\gxai\packages\smart-agent\app
+
+02/23/2026  03:21 PM    &lt;DIR&gt;          .
+02/23/2026  11:21 AM    &lt;DIR&gt;          ..
+02/23/2026  03:21 PM               463 directory_listing.txt
+02/23/2026  11:20 AM               339 server.ts
+02/23/2026  01:25 AM    &lt;DIR&gt;          src
+02/23/2026  01:25 AM               357 tsconfig.json
+               3 File(s)          1,159 bytes
+               3 Dir(s)  699,504,472,064 bytes free

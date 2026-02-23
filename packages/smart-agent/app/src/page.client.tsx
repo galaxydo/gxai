@@ -1,8 +1,10 @@
-// app/src/page.client.tsx — Client mount script for chat interactivity
+// app/src/page.client.tsx — Workspace client: agent management, chat, tabbed overview
 import { render } from 'melina/client';
 import { measure, measureSync, configure } from 'measure-fn';
 
 configure({ timestamps: true });
+
+// ── Types ──
 
 interface AgentEvent {
     type: string
@@ -17,44 +19,94 @@ interface AgentEvent {
     error?: string
 }
 
-interface ChatState {
-    messages: Array<{ type: 'user' | 'event'; content: any }>
-    events: AgentEvent[]
+interface AgentEntry {
+    id: string
+    name: string
+    sessionId: string | null
+    status: 'idle' | 'running'
+}
+
+interface WorkspaceState {
+    agents: AgentEntry[]
+    activeAgentId: string | null
     objectives: Array<{ name: string; description: string; type: string; met?: boolean; reason?: string }>
+    files: Array<{ path: string; action: 'read' | 'write' }>
+    schedules: Array<{
+        id: string
+        name: string
+        scriptPath: string
+        intervalSec: number
+        nextRun: number
+        lastRun?: number
+        lastResult?: { success: boolean; output: string; error?: string }
+    }>
     isRunning: boolean
     activeSkills: Set<string>
     availableSkills: string[]
-    sessionId: string | null
+    activeTab: 'objectives' | 'files' | 'schedule'
 }
 
-const state: ChatState = {
-    messages: [],
-    events: [],
+const state: WorkspaceState = {
+    agents: [],
+    activeAgentId: null,
     objectives: [],
+    files: [],
+    schedules: [],
     isRunning: false,
     activeSkills: new Set(),
     availableSkills: [],
-    sessionId: null,
+    activeTab: 'objectives',
 }
 
+// Per-agent chat + state persistence
+const agentChatStore = new Map<string, {
+    html: string
+    objectives: WorkspaceState['objectives']
+    files: WorkspaceState['files']
+    toolCards: typeof toolCardsRef
+}>()
+type ToolCardEntry = { el: HTMLElement; name: string; params: Record<string, any>; result?: any }
+const toolCardsRef: ToolCardEntry[] = []
+
+// ── DOM refs ──
 let chatArea: HTMLElement
 let inputEl: HTMLTextAreaElement
 let sendBtn: HTMLButtonElement
 let modelSelect: HTMLSelectElement
+let agentList: HTMLElement
+let agentHeaderName: HTMLElement
+let agentStatusDot: HTMLElement
 
 export default function mount() {
     chatArea = document.getElementById('chat-area')!
     inputEl = document.getElementById('input') as HTMLTextAreaElement
     sendBtn = document.getElementById('send-btn') as HTMLButtonElement
     modelSelect = document.getElementById('model-select') as HTMLSelectElement
+    agentList = document.getElementById('agent-list')!
+    agentHeaderName = document.getElementById('agent-header-name')!
+    agentStatusDot = document.getElementById('agent-status-dot')!
 
     // Load skills
     loadSkills()
 
+    // Tab switching
+    document.getElementById('tab-bar')!.addEventListener('click', (e) => {
+        const tab = (e.target as HTMLElement).closest('.tab') as HTMLElement | null
+        if (!tab) return
+        const tabName = tab.dataset.tab as any
+        if (tabName) switchTab(tabName)
+    })
+
+    // New agent button
+    document.getElementById('new-agent-btn')!.addEventListener('click', createAgent)
+
+    // Settings button
+    document.getElementById('settings-btn')!.addEventListener('click', openSettings)
+
     // Auto-resize textarea
     inputEl.addEventListener('input', () => {
         inputEl.style.height = 'auto'
-        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px'
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px'
     })
 
     // Enter to send
@@ -67,18 +119,182 @@ export default function mount() {
 
     sendBtn.addEventListener('click', sendMessage)
 
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+N — new agent
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+            e.preventDefault()
+            createAgent()
+            inputEl.focus()
+        }
+        // Escape — close settings
+        if (e.key === 'Escape') {
+            closeSettings()
+        }
+    })
+
     // Example chip delegation
     document.addEventListener('click', (e) => {
         const chip = (e.target as HTMLElement).closest('[data-prompt]') as HTMLElement | null
         if (chip) {
+            // Auto-create agent if none selected
+            if (!state.activeAgentId) createAgent()
             inputEl.value = chip.dataset.prompt || ''
             inputEl.dispatchEvent(new Event('input'))
             sendMessage()
         }
     })
 
+    // Overview resize
+    setupResizeHandle()
+
     return () => { }
 }
+
+// ══════════════════════════════════════
+// AGENT MANAGEMENT
+// ══════════════════════════════════════
+
+function createAgent() {
+    const id = Math.random().toString(36).substring(2, 8)
+    const num = state.agents.length + 1
+    const agent: AgentEntry = {
+        id,
+        name: `Agent ${num}`,
+        sessionId: null,
+        status: 'idle',
+    }
+    state.agents.push(agent)
+    selectAgent(id)
+    renderSidebar()
+}
+
+function deleteAgent(id: string) {
+    if (state.isRunning && state.activeAgentId === id) return // can't delete running agent
+    const idx = state.agents.findIndex(a => a.id === id)
+    if (idx < 0) return
+    state.agents.splice(idx, 1)
+    agentChatStore.delete(id)
+
+    if (state.activeAgentId === id) {
+        // Switch to another agent or clear
+        if (state.agents.length > 0) {
+            selectAgent(state.agents[Math.max(0, idx - 1)].id)
+        } else {
+            state.activeAgentId = null
+            agentHeaderName.textContent = 'Select or create an agent'
+            agentStatusDot.className = 'agent-status-dot'
+            chatArea.innerHTML = ''
+            // Re-show empty state
+            const emptyHtml = `<div class="empty-state" id="empty-state">
+                <div class="empty-icon">🤖</div>
+                <h2>Smart Agent Workspace</h2>
+                <p>Create a new agent or select one from the sidebar, then describe what you want it to do.</p>
+                <div class="example-chips">
+                    <button class="example-chip" data-prompt="tell me a short joke">🎭 tell me a joke</button>
+                    <button class="example-chip" data-prompt="list all files in the current directory">📂 list files here</button>
+                    <button class="example-chip" data-prompt="create a hello.txt file that says Hello World">📝 create hello.txt</button>
+                    <button class="example-chip" data-prompt="what version of bun is installed?">⚡ bun version</button>
+                </div>
+            </div>`
+            chatArea.innerHTML = emptyHtml
+            state.objectives = []
+            state.files = []
+            renderObjectivesPane()
+            renderFilesPane()
+        }
+    }
+    renderSidebar()
+}
+
+function selectAgent(id: string) {
+    const prev = state.activeAgentId
+
+    // Save current agent's chat state before switching
+    if (prev && prev !== id) {
+        agentChatStore.set(prev, {
+            html: chatArea.innerHTML,
+            objectives: [...state.objectives],
+            files: [...state.files],
+            toolCards: [...toolCards],
+        })
+    }
+
+    state.activeAgentId = id
+    const agent = state.agents.find(a => a.id === id)
+    if (!agent) return
+
+    // Update header
+    agentHeaderName.textContent = agent.name
+    agentStatusDot.className = `agent-status-dot ${agent.status === 'running' ? 'active' : ''}`
+
+    // Restore saved chat for this agent, or clear
+    const saved = agentChatStore.get(id)
+    if (saved) {
+        chatArea.innerHTML = saved.html
+        state.objectives = saved.objectives
+        state.files = saved.files
+        toolCards.length = 0
+        toolCards.push(...saved.toolCards)
+        // Re-attach thinking card toggle listeners
+        chatArea.querySelectorAll('.card-thinking .thinking-toggle').forEach(toggle => {
+            const card = toggle.closest('.card-thinking') as HTMLElement
+            if (card && !card.dataset.bound) {
+                card.dataset.bound = '1'
+                toggle.addEventListener('click', () => card.classList.toggle('collapsed'))
+            }
+        })
+    } else {
+        chatArea.innerHTML = ''
+        state.objectives = []
+        state.files = []
+        toolCards.length = 0
+    }
+
+    state.schedules = []
+    renderObjectivesPane()
+    renderFilesPane()
+    renderSchedulePane()
+    renderSidebar()
+}
+
+function getActiveAgent(): AgentEntry | null {
+    return state.agents.find(a => a.id === state.activeAgentId) || null
+}
+
+// ── Sidebar JSX ──
+
+function SidebarAgent({ agent, isActive }: { agent: AgentEntry; isActive: boolean }) {
+    return (
+        <button
+            className={`sidebar-agent ${isActive ? 'active' : ''}`}
+            onClick={() => selectAgent(agent.id)}
+        >
+            <span className={`agent-dot ${agent.status === 'running' ? 'running' : 'idle'}`} />
+            <span className="sidebar-agent-name">{agent.name}</span>
+            <span
+                className="sidebar-agent-delete"
+                onClick={(e: Event) => { e.stopPropagation(); deleteAgent(agent.id) }}
+                title="Delete agent"
+            >✕</span>
+        </button>
+    )
+}
+
+function renderSidebar() {
+    render(
+        <div>
+            {state.agents.map(a => (
+                <SidebarAgent agent={a} isActive={a.id === state.activeAgentId} />
+            ))}
+        </div>,
+        agentList
+    )
+}
+
+// ══════════════════════════════════════
+// SKILLS
+// ══════════════════════════════════════
 
 async function loadSkills() {
     await measure('Load skills', async () => {
@@ -110,26 +326,65 @@ function renderSkillChips() {
     )
 }
 
+// ══════════════════════════════════════
+// TAB SWITCHING
+// ══════════════════════════════════════
+
+function switchTab(tab: 'objectives' | 'files' | 'schedule') {
+    state.activeTab = tab
+
+    // Update tab buttons
+    document.querySelectorAll('#tab-bar .tab').forEach(t => {
+        t.classList.toggle('active', (t as HTMLElement).dataset.tab === tab)
+    })
+
+    // Update panes
+    document.querySelectorAll('.tab-pane').forEach(p => {
+        p.classList.toggle('active', p.id === `pane-${tab}`)
+    })
+
+    // Schedule polling
+    if (tab === 'schedule') {
+        startSchedulePolling()
+    } else {
+        stopSchedulePolling()
+    }
+}
+
+// ══════════════════════════════════════
+// CHAT
+// ══════════════════════════════════════
+
 async function sendMessage() {
     const text = inputEl.value.trim()
     if (!text || state.isRunning) return
+    if (!state.activeAgentId) {
+        createAgent()
+    }
 
+    const agent = getActiveAgent()!
     state.isRunning = true
+    agent.status = 'running'
+    agentStatusDot.className = 'agent-status-dot active'
     sendBtn.setAttribute('disabled', 'true')
     inputEl.value = ''
     inputEl.style.height = 'auto'
+    renderSidebar()
 
     // Remove empty state
     const empty = document.getElementById('empty-state')
     if (empty) empty.remove()
 
-    // Add user message
+    // Rename agent if first message
+    if (!agent.sessionId) {
+        agent.name = text.length > 24 ? text.substring(0, 24) + '…' : text
+        agentHeaderName.textContent = agent.name
+        renderSidebar()
+    }
+
     appendUserBubble(text)
+    activeLoadingEl = appendLoading()
 
-    // Add loading indicator
-    const loadingEl = appendLoading()
-
-    // SSE stream
     await measure(`Chat: "${text.substring(0, 40)}"`, async (m) => {
         try {
             const res = await m('POST /api/chat', () => fetch('/api/chat', {
@@ -139,7 +394,7 @@ async function sendMessage() {
                     message: text,
                     model: modelSelect.value,
                     skills: [...state.activeSkills],
-                    sessionId: state.sessionId,
+                    sessionId: agent.sessionId,
                 }),
             }))
 
@@ -179,32 +434,103 @@ async function sendMessage() {
         }
     })
 
-    loadingEl.remove()
+    clearLoading()
     state.isRunning = false
+    agent.status = 'idle'
+    agentStatusDot.className = 'agent-status-dot'
     sendBtn.removeAttribute('disabled')
     inputEl.focus()
+    renderSidebar()
+}
+
+// ══════════════════════════════════════
+// EVENT HANDLING
+// ══════════════════════════════════════
+
+// Streaming state
+let streamingEl: HTMLElement | null = null
+let streamingContent = ''
+let activeLoadingEl: HTMLElement | null = null
+
+function clearLoading() {
+    if (activeLoadingEl) { activeLoadingEl.remove(); activeLoadingEl = null }
 }
 
 function handleEvent(type: string, data: any) {
+    const agent = getActiveAgent()
+
     switch (type) {
         case 'session':
-            state.sessionId = data.sessionId
+            if (agent) agent.sessionId = data.sessionId
             break
         case 'replanning':
+            clearLoading()
             appendCard('thinking', 'Replanning', `Adjusting objectives for: "${data.message}"`)
             break
         case 'planning':
             state.objectives = (data.objectives || []).map((o: any) => ({ ...o, met: undefined, reason: undefined }))
-            appendObjectivesPanel()
+            renderObjectivesPane()
+            switchTab('objectives')
+            appendCard('planning', 'Planned Objectives', state.objectives.map((o: any) => `• ${o.name} — ${o.description}`).join('\n'))
             break
         case 'iteration_start':
+            // Clear any previous stream for new iteration
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
             appendDivider(`Iteration ${data.iteration} · ${((data.elapsed || 0) / 1000).toFixed(1)}s`)
             break
+        case 'thinking_delta': {
+            // Progressive streaming — append token to streaming bubble
+            clearLoading()
+            streamingContent += data.delta || ''
+            if (!streamingEl) {
+                streamingEl = document.createElement('div')
+                streamingEl.className = 'msg msg-agent streaming'
+                streamingEl.innerHTML = `<div class="bubble streaming-bubble"><span class="stream-text"></span><span class="stream-cursor">▌</span></div>`
+                chatArea.appendChild(streamingEl)
+            }
+            const textEl = streamingEl.querySelector('.stream-text')
+            if (textEl) textEl.textContent = streamingContent
+            scrollDown()
+            break
+        }
         case 'thinking':
-            appendCard('thinking', 'Thinking', data.message || '')
+            // Finalize stream: remove streaming bubble, show thinking card
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
+            lastThinkingMessage = data.message || ''
+            lastThinkingEl = appendThinkingCard(data.message || '')
             break
         case 'tool_start':
+            // Clear stream when tools start
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
             appendToolCard(data.tool || '', data.params || {})
+            // Auto-switch to schedule tab when schedule tool is used
+            if (data.tool === 'schedule') {
+                fetchSchedules()
+                switchTab('schedule')
+            }
+            // Track files
+            if (data.params?.path) {
+                const action = ['write_file', 'edit_file'].includes(data.tool) ? 'write' as const : 'read' as const
+                const existing = state.files.find(f => f.path === data.params.path)
+                if (!existing) {
+                    state.files.push({ path: data.params.path, action })
+                } else if (action === 'write') {
+                    existing.action = 'write'
+                }
+                renderFilesPane()
+            }
             break
         case 'tool_result':
             updateLastTool(data.result!)
@@ -212,24 +538,246 @@ function handleEvent(type: string, data: any) {
         case 'objective_check':
             updateObjectives(data.results || [])
             break
-        case 'complete':
-            appendCard('complete', 'Complete', `Done in ${(data.iteration || 0) + 1} iteration${(data.iteration || 0) > 0 ? 's' : ''} (${((data.elapsed || 0) / 1000).toFixed(1)}s)`)
+        case 'complete': {
+            // Clear streaming
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
+            // Show the last thinking message as a clean response bubble
+            if (lastThinkingMessage) {
+                if (lastThinkingEl) lastThinkingEl.remove()
+                appendResponseBubble(lastThinkingMessage)
+            }
+            const iters = (data.iteration || 0) + 1
+            const elapsed = ((data.elapsed || 0) / 1000).toFixed(1)
+            appendCard('complete', '✓ Complete', `${iters} iteration${iters > 1 ? 's' : ''} · ${elapsed}s`)
+            lastThinkingMessage = ''
+            lastThinkingEl = null
+            // Refresh schedule data in case agent scheduled tasks
+            fetchSchedules()
             break
+        }
         case 'error':
             appendCard('error', 'Error', data.error || '')
             break
-        case 'max_iterations':
-            appendCard('error', 'Max Iterations', `Stopped after ${data.iteration} iterations`)
+        case 'max_iterations': {
+            if (streamingEl) {
+                streamingEl.remove()
+                streamingEl = null
+                streamingContent = ''
+            }
+            if (lastThinkingMessage) {
+                if (lastThinkingEl) lastThinkingEl.remove()
+                appendResponseBubble(lastThinkingMessage)
+            }
+            appendCard('error', 'Reached Limit', `Stopped after ${data.iteration} iterations. Try rephrasing your request or breaking it into smaller steps.`)
+            lastThinkingMessage = ''
+            lastThinkingEl = null
             break
+        }
     }
 }
 
-// ── JSX Components ──
+// ══════════════════════════════════════
+// OVERVIEW PANELS
+// ══════════════════════════════════════
+
+// ── Objectives ──
+
+function ObjectiveItem({ obj }: { obj: { name: string; description: string; met?: boolean; reason?: string } }) {
+    const status = obj.met === undefined ? '' : obj.met ? 'met' : 'unmet'
+    const icon = obj.met === undefined ? '⏳' : obj.met ? '✅' : '❌'
+    return (
+        <div className={`obj-item ${status}`} data-obj={obj.name}>
+            <span className="obj-icon">{icon}</span>
+            <div className="obj-info">
+                <span className="obj-name">{obj.name}</span>
+                <span className="obj-desc">{obj.description}</span>
+                {obj.reason && <span className="obj-reason">{obj.reason}</span>}
+            </div>
+        </div>
+    )
+}
+
+function renderObjectivesPane() {
+    const pane = document.getElementById('pane-objectives')!
+    if (state.objectives.length === 0) {
+        render(<div className="overview-empty">No objectives yet. Send a message to start planning.</div>, pane)
+    } else {
+        render(
+            <div className="obj-grid">
+                {state.objectives.map(o => <ObjectiveItem obj={o} />)}
+            </div>,
+            pane
+        )
+    }
+}
+
+function updateObjectives(results: Array<{ name: string; met: boolean; reason: string }>) {
+    for (const r of results) {
+        const obj = state.objectives.find(o => o.name === r.name)
+        if (obj) {
+            obj.met = r.met
+            obj.reason = r.reason
+        }
+    }
+    renderObjectivesPane()
+}
+
+// ── Files ──
+
+function renderFilesPane() {
+    const pane = document.getElementById('pane-files')!
+    if (state.files.length === 0) {
+        render(<div className="overview-empty">No files touched yet.</div>, pane)
+    } else {
+        render(
+            <div className="file-list">
+                {state.files.map(f => (
+                    <div className="file-item">
+                        <span className="file-icon">{f.action === 'write' ? '📝' : '📄'}</span>
+                        <span className="file-path">{f.path}</span>
+                        <span className={`file-action ${f.action}`}>{f.action}</span>
+                    </div>
+                ))}
+            </div>,
+            pane
+        )
+    }
+}
+
+// ── Schedule ──
+
+let schedulePoller: ReturnType<typeof setInterval> | null = null
+
+async function fetchSchedules() {
+    try {
+        const res = await fetch('/api/schedule')
+        if (res.ok) {
+            state.schedules = await res.json()
+            renderSchedulePane()
+        }
+    } catch { /* ignore */ }
+}
+
+function startSchedulePolling() {
+    if (schedulePoller) return
+    fetchSchedules()
+    schedulePoller = setInterval(fetchSchedules, 5000)
+}
+
+function stopSchedulePolling() {
+    if (schedulePoller) { clearInterval(schedulePoller); schedulePoller = null }
+}
+
+function formatTimeUntil(ts: number): string {
+    const diff = Math.max(0, ts - Date.now())
+    const sec = Math.floor(diff / 1000)
+    if (sec < 60) return `${sec}s`
+    const min = Math.floor(sec / 60)
+    return `${min}m ${sec % 60}s`
+}
+
+function renderSchedulePane() {
+    const pane = document.getElementById('pane-schedule')!
+    if (state.schedules.length === 0) {
+        render(<div className="overview-empty">No scheduled tasks yet.</div>, pane)
+    } else {
+        render(
+            <div className="schedule-list">
+                {state.schedules.map(s => (
+                    <div className="schedule-item" key={s.id}>
+                        <div className="schedule-left">
+                            <span className="schedule-icon">{'\u23F1'}</span>
+                            <div className="schedule-info">
+                                <div className="schedule-name">{s.name}</div>
+                                <div className="schedule-meta">
+                                    every {s.intervalSec}s · next in {formatTimeUntil(s.nextRun)}
+                                </div>
+                                <div className="schedule-script">{s.scriptPath.split(/[/\\]/).pop()}</div>
+                            </div>
+                        </div>
+                        <div className="schedule-right">
+                            {s.lastResult ? (
+                                <span className={`schedule-status ${s.lastResult.success ? 'ok' : 'err'}`}>
+                                    {s.lastResult.success ? '\u2713' : '\u2717'} {s.lastRun ? new Date(s.lastRun).toLocaleTimeString() : ''}
+                                </span>
+                            ) : (
+                                <span className="schedule-status pending">pending</span>
+                            )}
+                            <button className="schedule-cancel" onClick={() => cancelTask(s.id)} title="Cancel task">{'\u2715'}</button>
+                        </div>
+                    </div>
+                ))}
+            </div>,
+            pane
+        )
+    }
+}
+
+async function cancelTask(id: string) {
+    await fetch(`/api/schedule?id=${id}`, { method: 'DELETE' })
+    state.schedules = state.schedules.filter(s => s.id !== id)
+    renderSchedulePane()
+}
+
+// ══════════════════════════════════════
+// CHAT RENDERING
+// ══════════════════════════════════════
 
 function UserBubble({ text }: { text: string }) {
     return (
         <div className="msg msg-user">
             <div className="bubble">{text}</div>
+        </div>
+    )
+}
+
+function ResponseBubble({ text }: { text: string }) {
+    return (
+        <div className="msg msg-agent">
+            <div className="bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+        </div>
+    )
+}
+
+/** Lightweight markdown → HTML for response bubbles */
+function renderMarkdown(text: string): string {
+    return text
+        // Code blocks: ```lang\n...\n```
+        .replace(/```(\w+)?\n([\s\S]*?)```/g, (_: string, lang: string, code: string) =>
+            `<pre class="md-code-block"><code class="lang-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`)
+        // Inline code: `...`
+        .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+        // Bold: **...**
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        // Italic: *...*
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        // Links: [text](url)
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        // Line breaks
+        .replace(/\n/g, '<br>')
+}
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+}
+
+function ThinkingCard({ text }: { text: string }) {
+    const preview = text.length > 80 ? text.substring(0, 80) + '…' : text
+    return (
+        <div className="card card-thinking collapsed">
+            <div className="card-label thinking-toggle">
+                <span className="thinking-arrow">▶</span> Thinking
+            </div>
+            <div className="card-preview">{preview}</div>
+            <div className="card-body">{text}</div>
         </div>
     )
 }
@@ -256,32 +804,6 @@ function Card({ type, label, content }: { type: string; label: string; content: 
     )
 }
 
-function ObjectiveItem({ obj }: { obj: { name: string; description: string; met?: boolean; reason?: string } }) {
-    const status = obj.met === undefined ? '' : obj.met ? 'met' : 'unmet'
-    const icon = obj.met === undefined ? '⏳' : obj.met ? '✅' : '❌'
-    return (
-        <div className={`obj-item ${status}`} data-obj={obj.name}>
-            <span className="obj-icon">{icon}</span>
-            <div className="obj-info">
-                <span className="obj-name">{obj.name}</span>
-                <span className="obj-desc">{obj.description}</span>
-                {obj.reason && <span className="obj-reason">{obj.reason}</span>}
-            </div>
-        </div>
-    )
-}
-
-function ObjectivesPanel({ objectives }: { objectives: typeof state.objectives }) {
-    return (
-        <div className="card card-planning">
-            <div className="card-label">📋 Planned Objectives</div>
-            <div className="obj-grid">
-                {objectives.map(o => <ObjectiveItem obj={o} />)}
-            </div>
-        </div>
-    )
-}
-
 function ToolCard({ name, params, result }: {
     name: string
     params: Record<string, any>
@@ -304,7 +826,6 @@ function ToolCard({ name, params, result }: {
 
 // ── Render helpers ──
 
-/** Render JSX into a new container appended to the chat area, return the container */
 function appendJsx(jsx: any): HTMLElement {
     const el = document.createElement('div')
     chatArea.appendChild(el)
@@ -313,44 +834,31 @@ function appendJsx(jsx: any): HTMLElement {
     return el
 }
 
-function appendUserBubble(text: string) {
-    appendJsx(<UserBubble text={text} />)
-}
+function appendUserBubble(text: string) { appendJsx(<UserBubble text={text} />) }
+function appendResponseBubble(text: string) { appendJsx(<ResponseBubble text={text} />) }
+function appendLoading(): HTMLElement { return appendJsx(<Loading />) }
+function appendDivider(text: string) { appendJsx(<Divider text={text} />) }
+function appendCard(type: string, label: string, content: string) { appendJsx(<Card type={type} label={label} content={content} />) }
 
-function appendLoading(): HTMLElement {
-    return appendJsx(<Loading />)
-}
-
-function appendDivider(text: string) {
-    appendJsx(<Divider text={text} />)
-}
-
-function appendCard(type: string, label: string, content: string) {
-    appendJsx(<Card type={type} label={label} content={content} />)
-}
-
-let objectivesPanelEl: HTMLElement | null = null
-
-function appendObjectivesPanel() {
-    objectivesPanelEl = appendJsx(<ObjectivesPanel objectives={state.objectives} />)
-}
-
-function updateObjectives(results: Array<{ name: string; met: boolean; reason: string }>) {
-    if (!objectivesPanelEl) return
-    // Update state and re-render the panel
-    for (const r of results) {
-        const obj = state.objectives.find(o => o.name === r.name)
-        if (obj) {
-            obj.met = r.met
-            obj.reason = r.reason
+function appendThinkingCard(text: string): HTMLElement {
+    const el = appendJsx(<ThinkingCard text={text} />)
+    // Add click-to-expand behavior
+    const card = el.querySelector('.card-thinking') as HTMLElement
+    if (card) {
+        const toggle = card.querySelector('.thinking-toggle') as HTMLElement
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                card.classList.toggle('collapsed')
+            })
         }
     }
-    render(<ObjectivesPanel objectives={state.objectives} />, objectivesPanelEl)
-    scrollDown()
+    return el
 }
 
-// Tool cards — track them for result updates
-const toolCards: Array<{ el: HTMLElement; name: string; params: Record<string, any>; result?: any }> = []
+// Tool cards — track for result updates
+const toolCards: ToolCardEntry[] = []
+let lastThinkingMessage = ''
+let lastThinkingEl: HTMLElement | null = null
 
 function appendToolCard(name: string, params: Record<string, any>) {
     const entry = { el: null as any, name, params }
@@ -370,4 +878,97 @@ function scrollDown() {
     requestAnimationFrame(() => {
         chatArea.scrollTop = chatArea.scrollHeight
     })
+}
+
+// ══════════════════════════════════════
+// RESIZE HANDLE
+// ══════════════════════════════════════
+
+function setupResizeHandle() {
+    const handle = document.getElementById('overview-resize')!
+    const overview = document.getElementById('overview')!
+    let startY = 0
+    let startH = 0
+
+    handle.addEventListener('mousedown', (e) => {
+        startY = e.clientY
+        startH = overview.offsetHeight
+        document.body.style.cursor = 'row-resize'
+        document.body.style.userSelect = 'none'
+
+        const onMove = (ev: MouseEvent) => {
+            const delta = startY - ev.clientY
+            const newH = Math.max(120, Math.min(window.innerHeight * 0.6, startH + delta))
+            overview.style.height = newH + 'px'
+        }
+
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove)
+            document.removeEventListener('mouseup', onUp)
+            document.body.style.cursor = ''
+            document.body.style.userSelect = ''
+        }
+
+        document.addEventListener('mousemove', onMove)
+        document.addEventListener('mouseup', onUp)
+    })
+}
+
+// ══════════════════════════════════════
+// SETTINGS MODAL
+// ══════════════════════════════════════
+
+function SettingsModal() {
+    const cwd = location.origin
+    const model = modelSelect.value
+    const agentCount = state.agents.length
+
+    return (
+        <div className="settings-overlay" onClick={(e: Event) => {
+            if ((e.target as HTMLElement).classList.contains('settings-overlay')) closeSettings()
+        }}>
+            <div className="settings-panel">
+                <div className="settings-header">
+                    <span className="settings-title">⚙ Settings</span>
+                    <button className="settings-close" onClick={closeSettings}>✕</button>
+                </div>
+                <div className="settings-body">
+                    <div className="settings-group">
+                        <span className="settings-label">Working Directory</span>
+                        <div className="settings-value">{cwd}</div>
+                    </div>
+
+                    <div className="settings-group">
+                        <span className="settings-label">Active Model</span>
+                        <div className="settings-value">{model}</div>
+                    </div>
+
+                    <div className="settings-group">
+                        <span className="settings-label">Agents</span>
+                        <div className="settings-value">{agentCount} active</div>
+                    </div>
+
+                    <div className="settings-group">
+                        <span className="settings-label">Keyboard Shortcuts</span>
+                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+                            <div className="settings-kbd"><span className="kbd">Ctrl+N</span> New agent</div>
+                            <div className="settings-kbd"><span className="kbd">Enter</span> Send message</div>
+                            <div className="settings-kbd"><span className="kbd">Shift+Enter</span> New line</div>
+                            <div className="settings-kbd"><span className="kbd">Esc</span> Close modal</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function openSettings() {
+    const container = document.getElementById('settings-modal')!
+    render(<SettingsModal />, container)
+}
+
+function closeSettings() {
+    const container = document.getElementById('settings-modal')!
+    container.innerHTML = ''
 }

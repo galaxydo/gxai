@@ -1,50 +1,100 @@
-// app/src/page.tsx — Server-rendered chat page
-// Renders the static shell. Client mount script adds all interactivity.
-export default function ChatPage() {
+// app/src/page.tsx — Workspace layout: sidebar + chat + tabbed overview
+export default function Page() {
     return (
-        <div className="app-shell">
-            <header className="header">
-                <h1 className="header-title">
-                    <span className="header-icon">🤖</span>
-                    smart-agent
-                </h1>
-                <div className="header-controls">
-                    <div id="skill-toggles" className="skill-toggles"></div>
-                    <select id="model-select" className="model-select">
-                        <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-                        <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="gpt-4o-mini">GPT-4o Mini</option>
-                        <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
-                        <option value="deepseek-chat">DeepSeek Chat</option>
-                    </select>
-                </div>
-            </header>
+        <div className="workspace">
+            {/* ── Sidebar ── */}
+            <aside className="sidebar" id="sidebar">
+                <button className="sidebar-new-btn" id="new-agent-btn">
+                    <span>New Agent</span>
+                    <span className="sidebar-new-icon">+</span>
+                </button>
 
-            <div id="chat-area" className="chat-area">
-                <div id="empty-state" className="empty-state">
-                    <div className="empty-icon">🤖</div>
-                    <h2>What should I build?</h2>
-                    <p>Describe a task and I'll generate objectives, use tools, and work until it's done.</p>
-                    <div className="example-chips">
-                        <button className="example-chip" data-prompt="Create a hello.txt file with 'Hello World'">Create a file</button>
-                        <button className="example-chip" data-prompt="Create a TypeScript project with an add function and passing tests">Scaffold a project</button>
-                        <button className="example-chip" data-prompt="Write a Fibonacci function in fib.ts and verify it outputs the first 10 numbers">Write &amp; test code</button>
+                <div className="sidebar-agents" id="agent-list">
+                    {/* Dynamically populated by client */}
+                </div>
+
+                <div className="sidebar-bottom">
+                    <div className="sidebar-bottom-icons">
+                        <button className="sidebar-icon-btn" id="settings-btn" title="Settings">⚙</button>
+                    </div>
+                </div>
+            </aside>
+
+            {/* ── Main Area ── */}
+            <div className="main-area">
+                {/* Agent Header */}
+                <header className="agent-header" id="agent-header">
+                    <div className="agent-header-left">
+                        <span className="agent-status-dot active" id="agent-status-dot" />
+                        <span className="agent-header-name" id="agent-header-name">Select or create an agent</span>
+                    </div>
+                    <div className="agent-header-right">
+                        <select className="model-select" id="model-select">
+                            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                            <option value="gemini-3-flash-preview">gemini-3-flash</option>
+                            <option value="gemini-3-pro-preview">gemini-3-pro</option>
+                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                            <option value="claude-sonnet-4-20250514">claude-sonnet-4</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="deepseek-chat">deepseek</option>
+                        </select>
+                        <div id="skill-toggles" className="skill-toggles" />
+                    </div>
+                </header>
+
+                {/* Chat + Input */}
+                <div className="chat-section">
+                    <div className="chat-area" id="chat-area">
+                        <div className="empty-state" id="empty-state">
+                            <div className="empty-icon">🤖</div>
+                            <h2>Smart Agent Workspace</h2>
+                            <p>Create a new agent or select one from the sidebar, then describe what you want it to do.</p>
+                            <div className="example-chips">
+                                <button className="example-chip" data-prompt="tell me a short joke">🎭 tell me a joke</button>
+                                <button className="example-chip" data-prompt="list all files in the current directory">📂 list files here</button>
+                                <button className="example-chip" data-prompt="create a hello.txt file that says Hello World">📝 create hello.txt</button>
+                                <button className="example-chip" data-prompt="what version of bun is installed?">⚡ bun version</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="input-area">
+                        <div className="input-row">
+                            <textarea className="input-field" id="input" rows={1} placeholder="Type your command or question..." />
+                            <button className="send-btn" id="send-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ── Overview Panel (tabs) ── */}
+                <div className="overview" id="overview">
+                    <div className="overview-resize" id="overview-resize" />
+                    <div className="tab-bar" id="tab-bar">
+                        <button className="tab active" data-tab="objectives">Objectives</button>
+                        <button className="tab" data-tab="files">Files</button>
+                        <button className="tab" data-tab="schedule">Schedule</button>
+                    </div>
+                    <div className="tab-content" id="tab-content">
+                        <div className="tab-pane active" id="pane-objectives">
+                            <div className="overview-empty">No objectives yet. Send a message to start planning.</div>
+                        </div>
+                        <div className="tab-pane" id="pane-files">
+                            <div className="overview-empty">No files touched yet.</div>
+                        </div>
+                        <div className="tab-pane" id="pane-schedule">
+                            <div className="overview-empty">No scheduled tasks yet.</div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div className="input-area">
-                <div className="input-row">
-                    <textarea id="input" className="input-field" placeholder="Describe what you want the agent to do..." rows={1}></textarea>
-                    <button id="send-btn" className="send-btn" title="Send">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                    </button>
-                </div>
-            </div>
+            {/* Settings modal — rendered by client, positioned fixed so it doesn't affect grid */}
+            <div id="settings-modal" className="settings-modal-container"></div>
         </div>
-    );
+    )
 }

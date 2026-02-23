@@ -10,7 +10,7 @@ const skillsDir = join(import.meta.dir, "../../../../skills")
 // In-memory session store (keyed by session ID)
 const sessions = new Map<string, Session>()
 
-export async function* POST(req: Request) {
+export async function POST(req: Request) {
     const body = await measure('Parse request', () => req.json()) as {
         message: string
         model?: string
@@ -19,7 +19,7 @@ export async function* POST(req: Request) {
         sessionId?: string
     }
 
-    const model = body.model || "gemini-3-flash-preview"
+    const model = body.model || "gemini-2.5-flash"
     const cwd = body.cwd || process.cwd()
 
     // Validate API key early
@@ -29,10 +29,23 @@ export async function* POST(req: Request) {
         process.env.ANTHROPIC_API_KEY ||
         process.env.OPENAI_API_KEY
     )
+
     if (!hasKey) {
-        yield `event: error\ndata: ${JSON.stringify({ type: "error", iteration: -1, error: "No API key found. Set GEMINI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY." })}\n\n`
-        yield `event: done\ndata: {}\n\n`
-        return
+        const stream = new ReadableStream({
+            start(controller) {
+                const enc = new TextEncoder()
+                controller.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ type: "error", iteration: -1, error: "No API key found. Set GEMINI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY." })}\n\n`))
+                controller.enqueue(enc.encode(`event: done\ndata: {}\n\n`))
+                controller.close()
+            }
+        })
+        return new Response(stream, {
+            headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        })
     }
 
     // Resolve skill paths
@@ -57,22 +70,39 @@ export async function* POST(req: Request) {
         return s
     })!
 
-    // Emit session ID so client can track it
-    yield `event: session\ndata: ${JSON.stringify({ sessionId: session.id })}\n\n`
+    // Create SSE stream
+    const stream = new ReadableStream({
+        async start(controller) {
+            const enc = new TextEncoder()
 
-    try {
-        let eventCount = 0
-        for await (const event of session.send(body.message)) {
-            eventCount++
-            yield `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+            // Emit session ID
+            controller.enqueue(enc.encode(`event: session\ndata: ${JSON.stringify({ sessionId: session.id })}\n\n`))
+
+            try {
+                let eventCount = 0
+                for await (const event of session.send(body.message)) {
+                    eventCount++
+                    controller.enqueue(enc.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
+                }
+                measureSync(`SSE complete (${eventCount} events)`)
+                controller.enqueue(enc.encode(`event: done\ndata: {}\n\n`))
+            } catch (err: any) {
+                console.error("[chat] Error:", err)
+                controller.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ type: "error", iteration: -1, error: err.message || String(err) })}\n\n`))
+                controller.enqueue(enc.encode(`event: done\ndata: {}\n\n`))
+            } finally {
+                controller.close()
+            }
         }
-        measureSync(`SSE complete (${eventCount} events)`)
-        yield `event: done\ndata: {}\n\n`
-    } catch (err: any) {
-        console.error("[chat] Error:", err)
-        yield `event: error\ndata: ${JSON.stringify({ type: "error", iteration: -1, error: err.message || String(err) })}\n\n`
-        yield `event: done\ndata: {}\n\n`
-    }
+    })
+
+    return new Response(stream, {
+        headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    })
 }
 
 // List available skills

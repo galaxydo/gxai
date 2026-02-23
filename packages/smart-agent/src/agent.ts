@@ -14,7 +14,7 @@ import type {
     ToolResult,
 } from "./types"
 import { createBuiltinTools } from "./tools"
-import { callLLM } from "./llm"
+import { callLLM, streamLLM } from "./llm"
 import { loadSkills, formatSkillsForPrompt } from "./skills"
 import { objToXml, xmlToObj } from "./xml"
 import { hydrateObjective, PLANNER_SYSTEM_PROMPT } from "./objectives"
@@ -190,17 +190,19 @@ export class Agent {
             yield { type: "iteration_start", iteration: i, elapsed: Date.now() - startTime }
 
             try {
-                // ── Call LLM ──
-                const llmResponse = await measure(`Iteration ${i}`, () =>
-                    callLLM(
-                        this.config.model,
-                        state.messages.map(m => ({
-                            role: m.role === "tool" ? "user" : m.role,
-                            content: m.content,
-                        })),
-                        { temperature: this.config.temperature, maxTokens: this.config.maxTokens },
-                    )
-                )
+                // ── Call LLM (streaming) ──
+                let llmResponse = ""
+                for await (const chunk of streamLLM(
+                    this.config.model,
+                    state.messages.map(m => ({
+                        role: m.role === "tool" ? "user" : m.role,
+                        content: m.content,
+                    })),
+                    { temperature: this.config.temperature, maxTokens: this.config.maxTokens },
+                )) {
+                    llmResponse += chunk
+                    yield { type: "thinking_delta", iteration: i, delta: chunk }
+                }
 
                 if (!llmResponse) {
                     yield { type: "error", iteration: i, error: "LLM returned empty response" }
@@ -312,6 +314,15 @@ export class Agent {
 
         const custom = this.config.systemPrompt ? `\n\n${this.config.systemPrompt}` : ""
 
+        // Check if all objectives are conversational (respond type)
+        const isConversational = this.objectives.every(o =>
+            o.name.includes('respond') || o.name.includes('tell') || o.name.includes('explain') || o.name.includes('joke') || o.name.includes('answer')
+        )
+
+        const conversationalHint = isConversational
+            ? `\n\nNOTE: These objectives are conversational — just provide a helpful response in the <message> tag. No tools needed.`
+            : ""
+
         return `You are an autonomous agent that works toward objectives using tools.
 You operate in a loop: analyze state → invoke tools → repeat until all objectives are met.
 
@@ -321,6 +332,7 @@ ${this.skillsPrompt}
 
 OBJECTIVES (all must be met to complete):
 ${objectiveList}
+${conversationalHint}
 ${custom}
 
 RESPONSE FORMAT (XML):
@@ -343,7 +355,9 @@ RULES:
 3. Be precise with file paths and command syntax
 4. Learn from tool errors — adjust your approach
 5. When writing code, ensure it is correct and complete
-6. Keep messages concise but informative`
+6. Keep messages concise but informative
+7. If the objective just asks for a response (explanation, joke, advice), put your answer in the <message> tag — no tools needed
+8. On Windows, use 'dir' instead of 'ls', and 'type' instead of 'cat'`
     }
 
     private parseResponse(raw: string): {

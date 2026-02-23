@@ -120,10 +120,10 @@ commands:
 describe("Tools", () => {
     const tmpDir = join(process.cwd(), ".test-tools-tmp")
 
-    test("creates 4 built-in tools", () => {
-        const tools = createBuiltinTools(".", 5000)
-        expect(tools).toHaveLength(4)
-        expect(tools.map(t => t.name)).toEqual(["read_file", "write_file", "edit_file", "exec"])
+    test("creates 7 built-in tools", () => {
+        const tools = createBuiltinTools("/tmp", 5000)
+        expect(tools.length).toBe(7)
+        expect(tools.map(t => t.name)).toEqual(["read_file", "write_file", "edit_file", "exec", "list_dir", "search", "schedule"])
     })
 
     test("read_file reads existing file", async () => {
@@ -204,6 +204,77 @@ describe("Tools", () => {
         const exec = tools.find(t => t.name === "exec")!
         const result = await exec.execute({ command: "exit 1" })
         expect(result.success).toBe(false)
+    })
+
+    test("list_dir lists directory contents", async () => {
+        mkdirSync(join(tmpDir, "sub"), { recursive: true })
+        writeFileSync(join(tmpDir, "file1.txt"), "hello")
+        writeFileSync(join(tmpDir, "sub", "file2.ts"), "world")
+
+        const tools = createBuiltinTools(tmpDir, 5000)
+        const listDir = tools.find(t => t.name === "list_dir")!
+        const result = await listDir.execute({ path: "." })
+        expect(result.success).toBe(true)
+        expect(result.output).toContain("file1.txt")
+        expect(result.output).toContain("sub/")
+
+        rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    test("list_dir with depth 2 shows nested files", async () => {
+        mkdirSync(join(tmpDir, "deep"), { recursive: true })
+        writeFileSync(join(tmpDir, "deep", "nested.txt"), "deep content")
+
+        const tools = createBuiltinTools(tmpDir, 5000)
+        const listDir = tools.find(t => t.name === "list_dir")!
+        const result = await listDir.execute({ path: ".", depth: 2 })
+        expect(result.success).toBe(true)
+        expect(result.output).toContain("nested.txt")
+
+        rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    test("search finds pattern in files", async () => {
+        mkdirSync(tmpDir, { recursive: true })
+        writeFileSync(join(tmpDir, "code.ts"), "function greet() {\n  return 'hello'\n}")
+        writeFileSync(join(tmpDir, "readme.md"), "# Project\nSome docs about greet function")
+
+        const tools = createBuiltinTools(tmpDir, 5000)
+        const search = tools.find(t => t.name === "search")!
+        const result = await search.execute({ pattern: "greet", path: "." })
+        expect(result.success).toBe(true)
+        expect(result.output).toContain("code.ts")
+        expect(result.output).toContain("greet")
+
+        rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    test("search with include filter", async () => {
+        mkdirSync(tmpDir, { recursive: true })
+        writeFileSync(join(tmpDir, "app.ts"), "const x = 'target'")
+        writeFileSync(join(tmpDir, "app.css"), ".target { color: red }")
+
+        const tools = createBuiltinTools(tmpDir, 5000)
+        const search = tools.find(t => t.name === "search")!
+        const result = await search.execute({ pattern: "target", path: ".", include: "*.ts" })
+        expect(result.success).toBe(true)
+        expect(result.output).toContain("app.ts")
+        expect(result.output).not.toContain("app.css")
+
+        rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    test("search returns no matches message", async () => {
+        mkdirSync(tmpDir, { recursive: true })
+        writeFileSync(join(tmpDir, "empty.txt"), "nothing here")
+
+        const tools = createBuiltinTools(tmpDir, 5000)
+        const search = tools.find(t => t.name === "search")!
+        const result = await search.execute({ pattern: "xyznonexistent", path: "." })
+        expect(result.success).toBe(true)
+        expect(result.output).toContain("No matches")
+
+        rmSync(tmpDir, { recursive: true, force: true })
     })
 })
 
