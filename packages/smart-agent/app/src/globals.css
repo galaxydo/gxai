@@ -88,159 +88,501 @@ body {
     line-height: 1.5;
 }
 
-/* ── Model Cards ── */
-.model-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+.page-subtitle code {
+    background: var(--bg-3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+}
+
+/* ══════════════════════════════════════
+   MODELS PAGE — Provider Cards
+   ══════════════════════════════════════ */
+
+.providers-grid {
+    max-width: 900px;
+}
+
+.providers-list {
+    display: flex;
+    flex-direction: column;
     gap: 16px;
 }
 
-.model-card {
+.provider-card {
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--r);
-    padding: 20px;
-    transition: border-color .15s, box-shadow .15s;
+    overflow: hidden;
+    transition: border-color .2s, box-shadow .2s;
 }
 
-.model-card:hover {
-    border-color: var(--accent);
-    box-shadow: 0 0 20px var(--accent-glow);
+.provider-card.active {
+    border-color: rgba(34, 197, 94, .3);
 }
 
-.model-card-header {
+.provider-card:hover {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, .3);
+}
+
+.provider-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 10px;
+    align-items: center;
+    padding: 20px 24px;
 }
 
-.model-card-title h3 {
-    font-size: 15px;
+.provider-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.provider-icon {
+    font-size: 24px;
+}
+
+.provider-name {
+    font-size: 16px;
     font-weight: 600;
-    margin-bottom: 2px;
+    margin: 0;
 }
 
-.model-provider {
-    font-size: 11px;
-    color: var(--text-2);
-    font-weight: 500;
-}
-
-.tier-badge {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 3px 8px;
-    border-radius: 99px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.tier-recommended {
-    background: linear-gradient(135deg, rgba(99, 102, 241, .2), rgba(167, 139, 250, .2));
-    color: var(--purple-light);
-    border: 1px solid rgba(167, 139, 250, .3);
-}
-
-.tier-pro {
-    background: rgba(59, 130, 246, .12);
-    color: var(--blue);
-    border: 1px solid rgba(59, 130, 246, .2);
-}
-
-.tier-preview {
-    background: rgba(245, 158, 11, .12);
-    color: var(--amber);
-    border: 1px solid rgba(245, 158, 11, .2);
-}
-
-.tier-stable {
-    background: rgba(34, 197, 94, .12);
-    color: var(--green);
-    border: 1px solid rgba(34, 197, 94, .2);
-}
-
-.model-card-desc {
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 1.5;
-    margin-bottom: 12px;
-}
-
-.model-card-id {
+.provider-env-var {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: var(--text-3);
-    background: var(--bg-0);
-    padding: 3px 8px;
-    border-radius: 4px;
 }
 
-/* ── Skills List ── */
-.skills-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.skill-row {
+.provider-status {
     display: flex;
     align-items: center;
-    gap: 16px;
-    background: var(--bg-2);
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-3);
+    font-weight: 500;
+}
+
+.provider-status.connected {
+    color: var(--green);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-3);
+}
+
+.provider-status.connected .status-dot {
+    background: var(--green);
+    box-shadow: 0 0 6px rgba(34, 197, 94, .5);
+}
+
+/* ── API Key Section ── */
+
+.api-key-section {
+    padding: 0 24px 16px;
+}
+
+.key-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-0);
+    border-radius: var(--r-sm);
     border: 1px solid var(--border);
-    border-radius: var(--r);
-    padding: 16px 20px;
+}
+
+.key-masked {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-3);
+    flex: 1;
+    letter-spacing: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.key-source {
+    font-size: 10px;
+    color: var(--accent);
+    background: var(--accent-glow);
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.key-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.key-btn {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-3);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all .15s;
+}
+
+.key-btn:hover {
+    color: var(--text-1);
+    border-color: var(--accent);
+}
+
+.key-btn.key-save {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.key-btn.key-save:hover {
+    filter: brightness(1.1);
+}
+
+.key-btn.key-save.saving {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.key-btn.key-remove:hover {
+    color: var(--red);
+    border-color: var(--red);
+}
+
+.key-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.key-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    outline: none;
     transition: border-color .15s;
 }
 
-.skill-row:hover {
-    border-color: var(--border-focus);
+.key-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.key-input::placeholder {
+    color: var(--text-3);
+}
+
+/* ── Model rows inside provider cards ── */
+
+.model-list {
+    border-top: 1px solid var(--border);
+}
+
+.model-list.dimmed {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.model-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 24px;
+    border-bottom: 1px solid rgba(42, 42, 58, .5);
+    transition: background .15s;
+}
+
+.model-row:last-child {
+    border-bottom: none;
+}
+
+.model-row:hover {
+    background: rgba(99, 102, 241, .04);
+}
+
+.model-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.model-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.model-desc {
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.model-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.model-tier {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--tier-color);
+    background: color-mix(in srgb, var(--tier-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tier-color) 25%, transparent);
+}
+
+.model-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-3);
+    background: var(--bg-0);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* ══════════════════════════════════════
+   SKILLS PAGE — Expandable Skill Cards
+   ══════════════════════════════════════ */
+
+.skills-content {
+    max-width: 900px;
+}
+
+.skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.skill-card {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+    transition: border-color .2s, box-shadow .2s;
+}
+
+.skill-card:hover {
+    border-color: rgba(99, 102, 241, .3);
+}
+
+.skill-card.expanded {
+    border-color: var(--accent);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, .3);
+}
+
+.skill-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 24px;
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+}
+
+.skill-header:hover {
+    background: rgba(99, 102, 241, .04);
+}
+
+.skill-identity {
+    display: flex;
+    align-items: center;
+    gap: 14px;
 }
 
 .skill-icon {
     font-size: 24px;
     flex-shrink: 0;
-    width: 40px;
-    text-align: center;
 }
 
-.skill-info {
-    flex: 1;
-}
-
-.skill-info h3 {
-    font-size: 14px;
+.skill-name {
+    font-size: 15px;
     font-weight: 600;
-    margin-bottom: 3px;
+    margin: 0;
 }
 
-.skill-info p {
+.skill-desc {
     font-size: 12px;
     color: var(--text-2);
     line-height: 1.4;
 }
 
-.skill-badge {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 99px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+.skill-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     flex-shrink: 0;
 }
 
-.skill-badge.builtin {
-    background: rgba(34, 197, 94, .12);
-    color: var(--green);
-    border: 1px solid rgba(34, 197, 94, .2);
+.skill-cmds-count {
+    font-size: 11px;
+    color: var(--text-3);
+    font-weight: 500;
 }
 
-.skill-badge.optional {
-    background: rgba(99, 102, 241, .12);
+.skill-file-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
     color: var(--accent);
-    border: 1px solid rgba(99, 102, 241, .2);
+    background: var(--accent-glow);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.skill-expand-arrow {
+    font-size: 10px;
+    color: var(--text-3);
+    transition: transform .2s;
+    display: inline-block;
+}
+
+.skill-expand-arrow.open {
+    transform: rotate(90deg);
+}
+
+/* ── Skill Commands ── */
+
+.skill-commands {
+    padding: 0 24px 20px;
+}
+
+.commands-divider {
+    height: 1px;
+    background: var(--border);
+    margin-bottom: 16px;
+}
+
+.command-row {
+    padding: 12px 16px;
+    background: var(--bg-0);
+    border-radius: var(--r-sm);
+    margin-bottom: 8px;
+    border: 1px solid rgba(42, 42, 58, .5);
+}
+
+.command-row:last-child {
+    margin-bottom: 0;
+}
+
+.command-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.command-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-glow);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.command-desc {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.command-usage {
+    margin-bottom: 4px;
+}
+
+.command-usage code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-3);
+    background: var(--bg-2);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.command-params {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(42, 42, 58, .5);
+}
+
+.param-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.param-name {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--amber);
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.param-desc {
+    color: var(--text-3);
+}
+
+/* ── Skills Footer Hint ── */
+
+.skills-footer {
+    margin-top: 24px;
+}
+
+.skills-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 16px 20px;
+    background: rgba(99, 102, 241, .06);
+    border: 1px solid rgba(99, 102, 241, .15);
+    border-radius: var(--r);
+    font-size: 12px;
+    color: var(--text-2);
+    line-height: 1.5;
+}
+
+.hint-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.skills-hint code {
+    background: var(--bg-3);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
 }
 
 /* ── Coming Soon (Plugins) ── */
