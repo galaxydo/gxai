@@ -864,20 +864,87 @@ function ResponseBubble({ text }: { text: string }) {
 
 /** Lightweight markdown → HTML for response bubbles */
 function renderMarkdown(text: string): string {
+    // First extract code blocks to protect their content
+    const codeBlocks: string[] = []
+    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (_: string, lang: string, code: string) => {
+        const idx = codeBlocks.length
+        codeBlocks.push(`<pre class="md-code-block"><code class="lang-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`)
+        return `\x00CODE${idx}\x00`
+    })
+
+    // Process line-by-line for block-level elements
+    const lines = text.split('\n')
+    const out: string[] = []
+    let i = 0
+
+    while (i < lines.length) {
+        const line = lines[i]
+
+        // Code block placeholder
+        const codeMatch = line.match(/^\x00CODE(\d+)\x00$/)
+        if (codeMatch) {
+            out.push(codeBlocks[parseInt(codeMatch[1])])
+            i++
+            continue
+        }
+
+        // Headers
+        const hMatch = line.match(/^(#{1,4})\s+(.+)/)
+        if (hMatch) {
+            const level = hMatch[1].length
+            out.push(`<h${level} class="md-heading">${inlineFormat(hMatch[2])}</h${level}>`)
+            i++
+            continue
+        }
+
+        // Horizontal rule
+        if (/^---+$/.test(line.trim())) {
+            out.push('<hr class="md-hr">')
+            i++
+            continue
+        }
+
+        // Bullet lists (- or *)
+        if (/^\s*[-*]\s+/.test(line)) {
+            const items: string[] = []
+            while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+                items.push(lines[i].replace(/^\s*[-*]\s+/, ''))
+                i++
+            }
+            out.push('<ul class="md-list">' + items.map(it => `<li>${inlineFormat(it)}</li>`).join('') + '</ul>')
+            continue
+        }
+
+        // Numbered lists
+        if (/^\s*\d+[.)]\s+/.test(line)) {
+            const items: string[] = []
+            while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+                items.push(lines[i].replace(/^\s*\d+[.)]\s+/, ''))
+                i++
+            }
+            out.push('<ol class="md-list">' + items.map(it => `<li>${inlineFormat(it)}</li>`).join('') + '</ol>')
+            continue
+        }
+
+        // Normal line with inline formatting
+        if (line.trim()) {
+            out.push(inlineFormat(line))
+        } else {
+            out.push('<br>')
+        }
+        i++
+    }
+
+    return out.join('\n')
+}
+
+/** Inline markdown formatting: bold, italic, code, links */
+function inlineFormat(text: string): string {
     return text
-        // Code blocks: ```lang\n...\n```
-        .replace(/```(\w+)?\n([\s\S]*?)```/g, (_: string, lang: string, code: string) =>
-            `<pre class="md-code-block"><code class="lang-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`)
-        // Inline code: `...`
         .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-        // Bold: **...**
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        // Italic: *...*
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        // Links: [text](url)
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-        // Line breaks
-        .replace(/\n/g, '<br>')
 }
 
 function escapeHtml(text: string): string {
@@ -995,7 +1062,11 @@ function updateLastTool(result: { success: boolean; output: string; error?: stri
 
 function scrollDown() {
     requestAnimationFrame(() => {
-        chatArea.scrollTop = chatArea.scrollHeight
+        // Only auto-scroll if user is near the bottom (not manually scrolled up)
+        const isNearBottom = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 150
+        if (isNearBottom) {
+            chatArea.scrollTop = chatArea.scrollHeight
+        }
     })
 }
 

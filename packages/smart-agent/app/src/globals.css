@@ -1371,6 +1371,46 @@ body {
     color: var(--purple-light);
 }
 
+.bubble .md-heading {
+    color: var(--text-1);
+    font-weight: 600;
+    margin: 12px 0 4px;
+    line-height: 1.3;
+}
+
+.bubble h1.md-heading {
+    font-size: 1.15em;
+}
+
+.bubble h2.md-heading {
+    font-size: 1.05em;
+}
+
+.bubble h3.md-heading {
+    font-size: 0.95em;
+}
+
+.bubble h4.md-heading {
+    font-size: 0.9em;
+    color: var(--text-2);
+}
+
+.bubble .md-list {
+    margin: 6px 0;
+    padding-left: 20px;
+}
+
+.bubble .md-list li {
+    margin: 2px 0;
+    line-height: 1.5;
+}
+
+.bubble .md-hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+}
+
 /* ══════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════ */
