@@ -8,7 +8,7 @@ if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
 mkdirSync(tmpDir, { recursive: true })
 
 const agent = new Agent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     cwd: tmpDir,
     skills: [join(import.meta.dir, "../skills/bun.yaml")],
     maxIterations: 8,

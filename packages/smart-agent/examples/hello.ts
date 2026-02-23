@@ -2,7 +2,7 @@
 import { Agent } from "../src"
 
 const agent = new Agent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     cwd: import.meta.dir,
     objectives: [{
         name: "file_created",

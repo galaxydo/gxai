@@ -27,6 +27,27 @@ export async function DELETE(req: Request) {
     return Response.json({ ok: true })
 }
 
+/** PUT /api/chat — confirm or reject objectives */
+export async function PUT(req: Request) {
+    const { sessionId, confirmed } = await req.json() as { sessionId: string; confirmed: boolean }
+    if (!sessionId) return Response.json({ error: "Missing sessionId" }, { status: 400 })
+
+    const session = sessions.get(sessionId)
+    if (!session) return Response.json({ error: "Session not found" }, { status: 404 })
+
+    if (!session.isAwaitingConfirmation) {
+        return Response.json({ error: "Session is not awaiting confirmation" }, { status: 400 })
+    }
+
+    if (confirmed) {
+        session.confirmObjectives()
+    } else {
+        session.rejectObjectives()
+    }
+
+    return Response.json({ ok: true })
+}
+
 export async function POST(req: Request) {
     const body = await measure('Parse request', () => req.json()) as {
         message: string

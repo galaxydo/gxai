@@ -32,6 +32,49 @@ export function handleEvent(type: string, data: any) {
             switchTab('objectives')
             appendCard('planning', 'Planned Objectives', state.objectives.map((o: any) => `• ${o.name} — ${o.description}`).join('\n'))
             break
+        case 'awaiting_confirmation': {
+            clearLoading()
+            // Show confirmation card with Proceed / Cancel buttons
+            const card = document.createElement('div')
+            card.className = 'confirmation-card'
+            card.innerHTML = `
+                <div class="confirmation-header">
+                    <span class="confirmation-icon">⏸</span>
+                    <span>Review objectives before proceeding</span>
+                </div>
+                <div class="confirmation-actions">
+                    <button class="confirm-btn proceed" id="confirm-proceed">▶ Proceed</button>
+                    <button class="confirm-btn cancel" id="confirm-cancel">✕ Cancel</button>
+                </div>
+            `
+            dom.chatArea.appendChild(card)
+            scrollDown()
+
+            const sessionId = agent?.sessionId
+            card.querySelector('#confirm-proceed')!.addEventListener('click', async () => {
+                card.remove()
+                appendCard('info', 'Confirmed', 'Proceeding with objectives...')
+                if (sessionId) {
+                    await fetch('/api/chat', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId, confirmed: true }),
+                    })
+                }
+            })
+            card.querySelector('#confirm-cancel')!.addEventListener('click', async () => {
+                card.remove()
+                appendCard('cancelled', 'Cancelled', 'Objectives rejected — agent will not execute.')
+                if (sessionId) {
+                    await fetch('/api/chat', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId, confirmed: false }),
+                    })
+                }
+            })
+            break
+        }
         case 'iteration_start':
             if (streamingEl) {
                 streamingEl.remove()

@@ -15,7 +15,7 @@ import { Agent } from "smart-agent"
 
 // Predefined objectives
 const agent = new Agent({
-  model: "gemini-3-flash-preview",
+  model: "gemini-2.5-flash",
   objectives: [{
     name: "file_exists",
     description: "Create hello.txt with 'Hello World'",
@@ -32,17 +32,44 @@ for await (const event of agent.run("Create hello.txt")) {
 }
 ```
 
+## Multi-turn Sessions
+
+For chatbot-style interactions, use `Session`. It maintains conversation history and re-plans objectives each turn:
+
+```ts
+import { Session } from "smart-agent"
+
+const session = new Session({ model: "gemini-2.5-flash" })
+
+for await (const event of session.send("create a hello world project")) {
+  if (event.type === "awaiting_confirmation") {
+    // Objectives are paused — review before proceeding
+    console.log("Objectives:", event.objectives)
+    session.confirmObjectives()  // or session.rejectObjectives()
+  }
+  if (event.type === "complete") {
+    console.log("Done!")
+  }
+}
+
+// Follow-up — planner adjusts objectives based on context
+for await (const event of session.send("now add unit tests")) {
+  session.confirmObjectives()
+}
+```
+
+By default, sessions require confirmation before executing (`requireConfirmation: true`). This gives the user a chance to review and approve generated objectives. Disable with `{ requireConfirmation: false }`.
+
 ## Chatbot Mode — `Agent.plan()`
 
-When you don't know the objectives upfront, `Agent.plan()` uses a planner LLM to generate them from the user's message:
+For one-shot planning without sessions:
 
 ```ts
 import { Agent } from "smart-agent"
 
-// No predefined objectives — planner generates them
 for await (const event of Agent.plan(
   "Create a greeting.txt with 'Hello World'",
-  { model: "gemini-3-flash-preview" }
+  { model: "gemini-2.5-flash" }
 )) {
   if (event.type === "planning") {
     console.log("Generated objectives:", event.objectives)
@@ -112,7 +139,8 @@ Dynamic mode — planner generates objectives from the prompt, then worker execu
 
 | Event | When |
 |-------|------|
-| `planning` | Planner generated objectives (plan() only) |
+| `planning` | Planner generated objectives |
+| `awaiting_confirmation` | Waiting for user to confirm objectives (Session only) |
 | `iteration_start` | Loop iteration begins |
 | `thinking` | LLM explains what it's doing |
 | `tool_start` / `tool_result` | Tool execution |
@@ -129,6 +157,29 @@ Dynamic mode — planner generates objectives from the prompt, then worker execu
 | `write_file` | Create/overwrite a file |
 | `edit_file` | Find-and-replace in a file |
 | `exec` | Run shell commands |
+| `list_dir` | List directory contents (recursive) |
+| `search` | Search for text patterns across files |
+
+### Custom Tools
+
+Add your own tools via the `tools` config:
+
+```ts
+const agent = new Agent({
+  model: "gemini-2.5-flash",
+  tools: [{
+    name: "deploy",
+    description: "Deploy the app to production",
+    parameters: {
+      env: { type: "string", description: "Target environment", required: true },
+    },
+    execute: async (params) => {
+      // your deployment logic
+      return { success: true, output: `Deployed to ${params.env}` }
+    },
+  }],
+  objectives: [/* ... */],
+})
 
 ## Skills
 
@@ -203,6 +254,26 @@ When using `Agent.plan()`, the planner generates objectives using these template
 | Any | Other models | `OPENAI_API_KEY` + `OPENAI_BASE_URL` |
 
 Unknown models fall back to OpenAI-compatible `/chat/completions` API using `OPENAI_BASE_URL`.
+
+## Examples
+
+Run any example with `bun run examples/<name>.ts`:
+
+| Example | What it does |
+|---------|--------------|
+| `hello` | Creates a file — simplest possible agent |
+| `planner` | `Agent.plan()` — generates objectives from natural language |
+| `scaffold` | Multi-objective — creates project, writes tests, makes them pass |
+| `code-review` | Finds and fixes bugs in a deliberately broken file |
+| `refactor` | Splits a monolithic file into clean modules |
+| `api-gen` | Generates a REST API from a spec, writes tests, verifies them |
+| `session` | Multi-turn Session with objective confirmation/rejection |
+| `custom-tools` | Extends the agent with `http_get` and `json_transform` tools |
+
+```bash
+export GEMINI_API_KEY=your-key
+bun run examples/code-review.ts
+```
 
 ## License
 

@@ -12,7 +12,7 @@ console.log("🧠 Planner e2e: Agent.plan() generates objectives dynamically\n")
 for await (const event of Agent.plan(
     "Create a file called greeting.txt containing 'Hello from the planner agent!'",
     {
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         cwd: tmpDir,
         maxIterations: 5,
     }
