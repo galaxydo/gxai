@@ -123,6 +123,31 @@ export async function callLLM(
  * Streaming LLM call — yields text chunks as they arrive.
  * Currently supports Gemini streaming; other providers fall back to single-chunk.
  */
+/** Retry fetch on transient errors (429, 500, 502, 503) with exponential backoff */
+async function fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    label: string,
+    attempts = 4,
+    delayMs = 5000,
+): Promise<Response> {
+    for (let i = 0; i < attempts; i++) {
+        const res = await fetch(url, init)
+        if (res.status === 429 || res.status === 500 || res.status === 502 || res.status === 503) {
+            if (i === attempts - 1) {
+                const errText = await res.text()
+                throw new Error(`${label} failed after ${attempts} retries (${res.status}): ${errText.substring(0, 200)}`)
+            }
+            const wait = delayMs * Math.pow(2, i)
+            console.log(`[${label}] ${res.status} — retrying in ${(wait / 1000).toFixed(0)}s (attempt ${i + 1}/${attempts})`)
+            await new Promise(r => setTimeout(r, wait))
+            continue
+        }
+        return res
+    }
+    throw new Error(`${label} exhausted retries`) // unreachable
+}
+
 export async function* streamLLM(
     model: string,
     messages: Array<{ role: string; content: string }>,
@@ -159,8 +184,11 @@ export async function* streamLLM(
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`
         const headers = { "Content-Type": "application/json", "x-goog-api-key": apiKey }
 
-        const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) })
-        if (res.status === 429) throw new Error("Rate limited (429)")
+        const res = await fetchWithRetry(
+            url,
+            { method: "POST", headers, body: JSON.stringify(body) },
+            `Gemini stream ${model}`,
+        )
         if (!res.ok) {
             const errText = await res.text()
             throw new Error(`Gemini stream failed (${res.status}): ${errText.substring(0, 300)}`)
@@ -187,15 +215,19 @@ export async function* streamLLM(
             ...(system && { system }),
         }
 
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-api-key": apiKey,
-                "anthropic-version": "2023-06-01",
+        const res = await fetchWithRetry(
+            "https://api.anthropic.com/v1/messages",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": apiKey,
+                    "anthropic-version": "2023-06-01",
+                },
+                body: JSON.stringify(body),
             },
-            body: JSON.stringify(body),
-        })
+            `Anthropic stream ${model}`,
+        )
         if (!res.ok) {
             const errText = await res.text()
             throw new Error(`Anthropic stream failed (${res.status}): ${errText.substring(0, 300)}`)
@@ -226,11 +258,15 @@ export async function* streamLLM(
         ? { model, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: true }
         : { model, temperature, messages, max_tokens: maxTokens, stream: true }
 
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-    })
+    const res = await fetchWithRetry(
+        `${baseUrl}/chat/completions`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify(body),
+        },
+        `OpenAI stream ${model}`,
+    )
     if (!res.ok) {
         const errText = await res.text()
         throw new Error(`LLM stream failed (${res.status}): ${errText.substring(0, 300)}`)
