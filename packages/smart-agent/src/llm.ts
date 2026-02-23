@@ -166,33 +166,107 @@ export async function* streamLLM(
             throw new Error(`Gemini stream failed (${res.status}): ${errText.substring(0, 300)}`)
         }
 
-        const reader = res.body!.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
+        yield* parseSSEStream(res, (json: any) => {
+            return json.candidates?.[0]?.content?.parts?.[0]?.text || ""
+        })
+        return
+    }
+    // ── Anthropic Streaming ──
+    if (model.includes("claude")) {
+        const apiKey = process.env.ANTHROPIC_API_KEY
+        if (!apiKey) throw new Error("ANTHROPIC_API_KEY required")
 
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
+        const system = messages.find(m => m.role === "system")?.content
+        const nonSystem = messages.filter(m => m.role !== "system" && m.content?.trim())
 
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split("\n")
-            buffer = lines.pop() || "" // keep incomplete last line
-
-            for (const line of lines) {
-                if (!line.startsWith("data: ")) continue
-                const json = line.slice(6).trim()
-                if (!json || json === "[DONE]") continue
-                try {
-                    const data = JSON.parse(json)
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-                    if (text) yield text
-                } catch { /* skip unparseable chunks */ }
-            }
+        const body = {
+            model,
+            max_tokens: maxTokens,
+            messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
+            stream: true,
+            ...(system && { system }),
         }
+
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+            const errText = await res.text()
+            throw new Error(`Anthropic stream failed (${res.status}): ${errText.substring(0, 300)}`)
+        }
+
+        yield* parseSSEStream(res, (json: any) => {
+            if (json.type === "content_block_delta") {
+                return json.delta?.text || ""
+            }
+            return ""
+        })
         return
     }
 
-    // ── Non-streaming fallback for other providers ──
-    const full = await callLLM(model, messages, options)
-    yield full
+    // ── OpenAI-compatible Streaming (OpenAI, DeepSeek, OpenRouter, local) ──
+    const isDeepseek = model.includes("deepseek")
+    const apiKey = isDeepseek
+        ? process.env.DEEPSEEK_API_KEY
+        : process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error(`${isDeepseek ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY"} required for model: ${model}`)
+
+    const baseUrl = isDeepseek
+        ? "https://api.deepseek.com/v1"
+        : (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "")
+
+    const isReasoning = model.includes("o4-") || model.includes("o3-")
+    const body = isReasoning
+        ? { model, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: true }
+        : { model, temperature, messages, max_tokens: maxTokens, stream: true }
+
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`LLM stream failed (${res.status}): ${errText.substring(0, 300)}`)
+    }
+
+    yield* parseSSEStream(res, (json: any) => {
+        return json.choices?.[0]?.delta?.content || ""
+    })
+}
+
+/** Generic SSE stream parser — reads data: lines and extracts text via extractor fn */
+async function* parseSSEStream(
+    res: Response,
+    extractText: (json: any) => string,
+): AsyncGenerator<string> {
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+            if (!line.startsWith("data: ")) continue
+            const json = line.slice(6).trim()
+            if (!json || json === "[DONE]") continue
+            try {
+                const data = JSON.parse(json)
+                const text = extractText(data)
+                if (text) yield text
+            } catch { /* skip unparseable chunks */ }
+        }
+    }
 }
