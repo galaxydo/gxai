@@ -10,7 +10,8 @@
     "dependencies": {
         "js-yaml": "^4.1.0",
         "measure-fn": "latest",
-        "melina": "^2.3.1"
+        "melina": "^2.3.1",
+        "sqlite-zod-orm": "^3.26.0"
     },
     "devDependencies": {
         "@types/bun": "latest",

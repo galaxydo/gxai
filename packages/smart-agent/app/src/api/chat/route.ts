@@ -2,6 +2,7 @@
 import { measure, measureSync } from "measure-fn"
 import { Session } from "../../../../src"
 import type { AgentConfig } from "../../../../src"
+import { addMessage } from "../../../../src/db"
 import { join } from "path"
 import { readdirSync } from "fs"
 
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
         skills?: string[]
         cwd?: string
         sessionId?: string
+        agentId?: number
     }
 
     const model = body.model || "gemini-2.5-flash"
@@ -88,15 +90,30 @@ export async function POST(req: Request) {
         async start(controller) {
             const enc = new TextEncoder()
 
+            // Persist user message to DB
+            if (body.agentId) {
+                addMessage(body.agentId, 'user', body.message)
+            }
+
             // Emit session ID
             controller.enqueue(enc.encode(`event: session\ndata: ${JSON.stringify({ sessionId: session.id })}\n\n`))
 
             try {
                 let eventCount = 0
+                let assistantText = ''
                 for await (const event of session.send(body.message)) {
                     eventCount++
                     controller.enqueue(enc.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
+
+                    // Accumulate assistant response text
+                    if (event.type === 'thinking_delta') assistantText += (event as any).delta || ''
                 }
+
+                // Persist assistant response
+                if (body.agentId && assistantText) {
+                    addMessage(body.agentId, 'assistant', assistantText)
+                }
+
                 measureSync(`SSE complete (${eventCount} events)`)
                 controller.enqueue(enc.encode(`event: done\ndata: {}\n\n`))
             } catch (err: any) {

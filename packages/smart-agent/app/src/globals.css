@@ -30,6 +30,7 @@
     --r: 12px;
     --r-sm: 8px;
     --sidebar-w: 240px;
+    --nav-rail-w: 60px;
     --overview-h: 35vh;
 }
 
@@ -48,7 +49,7 @@ body {
    ══════════════════════════════════════ */
 .workspace {
     display: grid;
-    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-columns: var(--nav-rail-w) var(--sidebar-w) 1fr;
     height: 100vh;
     width: 100vw;
 }
@@ -56,6 +57,78 @@ body {
 /* Settings modal lives inside workspace but must not affect grid */
 .settings-modal-container {
     display: contents;
+}
+
+/* ── Nav Rail ── */
+.nav-rail {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: var(--bg-0);
+    border-right: 1px solid var(--border);
+    padding: 8px 0;
+    width: var(--nav-rail-w);
+    overflow: hidden;
+    z-index: 10;
+}
+
+.nav-rail-top,
+.nav-rail-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.nav-rail-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    padding: 8px 4px;
+    border-radius: var(--r-sm);
+    width: 52px;
+    transition: all .15s;
+    position: relative;
+}
+
+.nav-rail-btn svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.nav-rail-btn span {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    line-height: 1;
+}
+
+.nav-rail-btn:hover {
+    color: var(--text-2);
+    background: var(--bg-2);
+}
+
+.nav-rail-btn.active {
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.nav-rail-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    background: var(--accent);
+    border-radius: 0 3px 3px 0;
 }
 
 /* ══════════════════════════════════════

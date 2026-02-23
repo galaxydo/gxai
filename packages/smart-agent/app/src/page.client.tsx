@@ -20,15 +20,16 @@ interface AgentEvent {
 }
 
 interface AgentEntry {
-    id: string
+    id: number
     name: string
     sessionId: string | null
     status: 'idle' | 'running'
+    model?: string
 }
 
 interface WorkspaceState {
     agents: AgentEntry[]
-    activeAgentId: string | null
+    activeAgentId: number | null
     objectives: Array<{ name: string; description: string; type: string; met?: boolean; reason?: string }>
     files: Array<{ path: string; action: 'read' | 'write' }>
     schedules: Array<{
@@ -48,7 +49,7 @@ interface WorkspaceState {
 
 const state: WorkspaceState = {
     agents: [],
-    activeAgentId: null,
+    activeAgentId: null as number | null,
     objectives: [],
     files: [],
     schedules: [],
@@ -59,7 +60,7 @@ const state: WorkspaceState = {
 }
 
 // Per-agent chat + state persistence
-const agentChatStore = new Map<string, {
+const agentChatStore = new Map<number, {
     html: string
     objectives: WorkspaceState['objectives']
     files: WorkspaceState['files']
@@ -100,8 +101,20 @@ export default function mount() {
     // New agent button
     document.getElementById('new-agent-btn')!.addEventListener('click', createAgent)
 
-    // Settings button
+    // Settings buttons (both sidebar and nav rail)
     document.getElementById('settings-btn')!.addEventListener('click', openSettings)
+    document.getElementById('nav-settings-btn')!.addEventListener('click', openSettings)
+
+    // Nav rail page switching
+    document.querySelectorAll('.nav-rail-btn[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.nav-rail-btn').forEach(b => b.classList.remove('active'))
+            btn.classList.add('active')
+            const page = (btn as HTMLElement).dataset.page
+            if (page === 'settings') openSettings()
+            // Other pages TBD
+        })
+    })
 
     // Header action buttons
     document.getElementById('export-chat-btn')!.addEventListener('click', exportChatAsMarkdown)
@@ -232,111 +245,88 @@ export default function mount() {
         inputEl.focus()
     })
 
-    // Restore persisted state
+    // Restore persisted state from server
     restoreState()
 
     return () => { }
 }
 
 // ══════════════════════════════════════
-// PERSISTENCE (localStorage)
+// PERSISTENCE (SQLite API)
 // ══════════════════════════════════════
 
-const LS_KEY = 'smart-agent-state'
-
+/** Save current agent's in-memory chat HTML to store (for fast tab switching) */
 function saveState() {
-    try {
-        // Snapshot current agent's chat before saving
-        if (state.activeAgentId) {
-            agentChatStore.set(state.activeAgentId, {
-                html: chatArea.innerHTML,
-                objectives: [...state.objectives],
-                files: [...state.files],
-                toolCards: [...toolCards],
-            })
-        }
-
-        const data: any = {
-            agents: state.agents,
-            activeAgentId: state.activeAgentId,
-            chats: {} as Record<string, { html: string; objectives: any[]; files: any[] }>,
-        }
-
-        for (const [id, chat] of agentChatStore) {
-            data.chats[id] = {
-                html: chat.html,
-                objectives: chat.objectives,
-                files: chat.files,
-            }
-        }
-
-        localStorage.setItem(LS_KEY, JSON.stringify(data))
-    } catch { /* quota exceeded or private mode */ }
+    if (state.activeAgentId) {
+        agentChatStore.set(state.activeAgentId, {
+            html: chatArea.innerHTML,
+            objectives: [...state.objectives],
+            files: [...state.files],
+            toolCards: [...toolCards],
+        })
+    }
 }
 
-function restoreState() {
+/** Restore agents from the server DB */
+async function restoreState() {
     try {
-        const raw = localStorage.getItem(LS_KEY)
-        if (!raw) return
+        const agents: any[] = await fetch('/api/agents').then(r => r.json())
+        if (!agents?.length) return
 
-        const data = JSON.parse(raw)
-        if (!data.agents?.length) return
-
-        // Restore agents
-        state.agents = data.agents.map((a: any) => ({
-            ...a,
-            status: 'idle' as const, // reset to idle on reload
+        state.agents = agents.map((a: any) => ({
+            id: a.id,
+            name: a.name || `Agent ${a.id}`,
+            sessionId: a.sessionId || null,
+            status: 'idle' as const,
+            model: a.model,
         }))
 
-        // Restore per-agent chat state into the store
-        if (data.chats) {
-            for (const [id, chat] of Object.entries(data.chats as Record<string, any>)) {
-                agentChatStore.set(id, {
-                    html: chat.html || '',
-                    objectives: chat.objectives || [],
-                    files: chat.files || [],
-                    toolCards: [], // can't serialize DOM elements
-                })
-            }
-        }
-
-        // Select the previously active agent
-        if (data.activeAgentId && state.agents.some((a: AgentEntry) => a.id === data.activeAgentId)) {
-            selectAgent(data.activeAgentId)
-        } else if (state.agents.length > 0) {
+        // Select first agent
+        if (state.agents.length > 0) {
             selectAgent(state.agents[0].id)
         }
-    } catch { /* corrupted data, ignore */ }
+    } catch { /* first load, no agents yet */ }
 }
 
 // ══════════════════════════════════════
 // AGENT MANAGEMENT
 // ══════════════════════════════════════
 
-function createAgent() {
-    const id = Math.random().toString(36).substring(2, 8)
-    const num = state.agents.length + 1
-    const agent: AgentEntry = {
-        id,
-        name: `Agent ${num}`,
-        sessionId: null,
-        status: 'idle',
+async function createAgent() {
+    try {
+        const num = state.agents.length + 1
+        const res = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: `Agent ${num}` }),
+        })
+        const created = await res.json()
+        const agent: AgentEntry = {
+            id: created.id,
+            name: created.name || `Agent ${num}`,
+            sessionId: null,
+            status: 'idle',
+            model: created.model,
+        }
+        state.agents.push(agent)
+        selectAgent(agent.id)
+        renderSidebar()
+    } catch (e) {
+        console.error('Failed to create agent:', e)
     }
-    state.agents.push(agent)
-    selectAgent(id)
-    renderSidebar()
-    saveState()
 }
 
-function deleteAgent(id: string) {
-    if (state.isRunning && state.activeAgentId === id) return // can't delete running agent
+async function deleteAgent(id: number) {
+    if (state.isRunning && state.activeAgentId === id) return
     const idx = state.agents.findIndex(a => a.id === id)
     if (idx < 0) return
     state.agents.splice(idx, 1)
     agentChatStore.delete(id)
 
+    // Delete on server
+    fetch(`/api/agents?id=${id}`, { method: 'DELETE' }).catch(() => { })
+
     if (state.activeAgentId === id) {
-        // Switch to another agent or clear
         if (state.agents.length > 0) {
             selectAgent(state.agents[Math.max(0, idx - 1)].id)
         } else {
@@ -367,7 +357,7 @@ function deleteAgent(id: string) {
     saveState()
 }
 
-function selectAgent(id: string) {
+function selectAgent(id: number) {
     const prev = state.activeAgentId
 
     // Save current agent's chat state before switching
@@ -589,7 +579,7 @@ async function sendMessage() {
     const text = inputEl.value.trim()
     if (!text || state.isRunning) return
     if (!state.activeAgentId) {
-        createAgent()
+        await createAgent()
     }
 
     const agent = getActiveAgent()!
@@ -610,6 +600,12 @@ async function sendMessage() {
         agent.name = text.length > 24 ? text.substring(0, 24) + '…' : text
         agentHeaderName.textContent = agent.name
         renderSidebar()
+        // Update name on server
+        fetch(`/api/agents?id=${agent.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: agent.name }),
+        }).catch(() => { })
     }
 
     appendUserBubble(text)
@@ -625,6 +621,7 @@ async function sendMessage() {
                     model: modelSelect.value,
                     skills: [...state.activeSkills],
                     sessionId: agent.sessionId,
+                    agentId: agent.id,
                 }),
             }))
 
