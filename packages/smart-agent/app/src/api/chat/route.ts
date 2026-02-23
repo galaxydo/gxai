@@ -1,9 +1,13 @@
-// app/src/api/chat/route.ts — SSE streaming endpoint for Agent.plan()
-import { Agent } from "../../../../src"
+// app/src/api/chat/route.ts — SSE streaming endpoint with Session pipeline
+import { Session } from "../../../../src"
+import type { AgentConfig } from "../../../../src"
 import { join } from "path"
 import { readdirSync } from "fs"
 
 const skillsDir = join(import.meta.dir, "../../../../skills")
+
+// In-memory session store (keyed by session ID)
+const sessions = new Map<string, Session>()
 
 export async function* POST(req: Request) {
     const body = await req.json() as {
@@ -11,15 +15,13 @@ export async function* POST(req: Request) {
         model?: string
         skills?: string[]
         cwd?: string
+        sessionId?: string
     }
 
     const model = body.model || "gemini-3-flash-preview"
     const cwd = body.cwd || process.cwd()
 
-    // Resolve skill names to file paths
-    const skillPaths = (body.skills || []).map(s => join(skillsDir, `${s}.yaml`))
-
-    // Validate API key early so errors are visible
+    // Validate API key early
     const hasKey = !!(
         process.env.GEMINI_API_KEY ||
         process.env.GOOGLE_API_KEY ||
@@ -32,13 +34,30 @@ export async function* POST(req: Request) {
         return
     }
 
+    // Resolve skill paths
+    const skillPaths = (body.skills || []).map(s => join(skillsDir, `${s}.yaml`))
+
+    const config: AgentConfig = {
+        model,
+        cwd,
+        skills: skillPaths.length > 0 ? skillPaths : undefined,
+        maxIterations: 10,
+    }
+
+    // Get or create session
+    let session: Session
+    if (body.sessionId && sessions.has(body.sessionId)) {
+        session = sessions.get(body.sessionId)!
+    } else {
+        session = new Session(config)
+        sessions.set(session.id, session)
+    }
+
+    // Emit session ID so client can track it
+    yield `event: session\ndata: ${JSON.stringify({ sessionId: session.id })}\n\n`
+
     try {
-        for await (const event of Agent.plan(body.message, {
-            model,
-            cwd,
-            skills: skillPaths.length > 0 ? skillPaths : undefined,
-            maxIterations: 10,
-        })) {
+        for await (const event of session.send(body.message)) {
             yield `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
         }
         yield `event: done\ndata: {}\n\n`

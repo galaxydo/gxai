@@ -21,6 +21,7 @@ interface ChatState {
     isRunning: boolean
     activeSkills: Set<string>
     availableSkills: string[]
+    sessionId: string | null
 }
 
 const state: ChatState = {
@@ -30,6 +31,7 @@ const state: ChatState = {
     isRunning: false,
     activeSkills: new Set(),
     availableSkills: [],
+    sessionId: null,
 }
 
 let chatArea: HTMLElement
@@ -133,6 +135,7 @@ async function sendMessage() {
                 message: text,
                 model: modelSelect.value,
                 skills: [...state.activeSkills],
+                sessionId: state.sessionId,
             }),
         })
 
@@ -171,10 +174,16 @@ async function sendMessage() {
     inputEl.focus()
 }
 
-function handleEvent(type: string, data: AgentEvent) {
+function handleEvent(type: string, data: any) {
     switch (type) {
+        case 'session':
+            state.sessionId = data.sessionId
+            break
+        case 'replanning':
+            appendCard('thinking', 'Replanning', `Adjusting objectives for: "${data.message}"`)
+            break
         case 'planning':
-            state.objectives = (data.objectives || []).map(o => ({ ...o, met: undefined, reason: undefined }))
+            state.objectives = (data.objectives || []).map((o: any) => ({ ...o, met: undefined, reason: undefined }))
             appendObjectivesPanel()
             break
         case 'iteration_start':

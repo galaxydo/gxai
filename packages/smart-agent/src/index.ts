@@ -1,5 +1,7 @@
 // smart-agent/src/index.ts
 export { Agent } from "./agent"
+export { Session } from "./session"
+export type { SessionEvent } from "./session"
 export { hydrateObjective } from "./objectives"
 export type {
     AgentConfig,
@@ -14,3 +16,4 @@ export type {
     Tool,
     ToolResult,
 } from "./types"
+
