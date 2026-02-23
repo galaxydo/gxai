@@ -166,12 +166,70 @@ export default function mount() {
         const btn = (e.target as HTMLElement).closest('.md-copy-btn') as HTMLElement | null
         if (!btn) return
         const code = btn.dataset.code || ''
-        // Decode HTML entities back to raw text
         const decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"')
         navigator.clipboard.writeText(decoded)
         btn.textContent = '✓ Copied'
         btn.classList.add('copied')
         setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied') }, 1500)
+    })
+
+    // Double-click agent header name to rename
+    agentHeaderName.addEventListener('dblclick', () => {
+        const agent = getActiveAgent()
+        if (!agent) return
+
+        const currentName = agent.name
+        const input = document.createElement('input')
+        input.type = 'text'
+        input.value = currentName
+        input.className = 'agent-rename-input'
+
+        const commitRename = () => {
+            const newName = input.value.trim() || currentName
+            agent.name = newName
+            agentHeaderName.textContent = newName
+            renderSidebar()
+            saveState()
+        }
+
+        input.addEventListener('blur', commitRename)
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); input.blur() }
+            if (e.key === 'Escape') { input.value = currentName; input.blur() }
+        })
+
+        agentHeaderName.textContent = ''
+        agentHeaderName.appendChild(input)
+        input.focus()
+        input.select()
+    })
+
+    // File drag-and-drop on chat area
+    chatArea.addEventListener('dragover', (e) => {
+        e.preventDefault()
+        chatArea.classList.add('drag-over')
+    })
+    chatArea.addEventListener('dragleave', () => {
+        chatArea.classList.remove('drag-over')
+    })
+    chatArea.addEventListener('drop', async (e) => {
+        e.preventDefault()
+        chatArea.classList.remove('drag-over')
+        const files = e.dataTransfer?.files
+        if (!files?.length) return
+
+        // Auto-create agent if none
+        if (!state.activeAgentId) createAgent()
+
+        for (const file of Array.from(files)) {
+            const text = await file.text()
+            const truncated = text.length > 10000 ? text.substring(0, 10000) + '\n...(truncated)' : text
+            const contextMsg = `[Attached file: ${file.name} (${(file.size / 1024).toFixed(1)}KB)]\n\n\`\`\`\n${truncated}\n\`\`\``
+            inputEl.value = (inputEl.value ? inputEl.value + '\n\n' : '') + contextMsg
+            inputEl.style.height = 'auto'
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px'
+        }
+        inputEl.focus()
     })
 
     // Restore persisted state
