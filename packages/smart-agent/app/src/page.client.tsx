@@ -213,113 +213,145 @@ function handleEvent(type: string, data: any) {
     }
 }
 
-// ── DOM helpers ──
+// ── JSX Components ──
 
-function esc(s: string): string {
-    const d = document.createElement('div')
-    d.textContent = s || ''
-    return d.innerHTML
+function UserBubble({ text }: { text: string }) {
+    return (
+        <div className="msg msg-user">
+            <div className="bubble">{text}</div>
+        </div>
+    )
 }
 
-function appendUserBubble(text: string) {
-    const el = document.createElement('div')
-    el.className = 'msg msg-user'
-    el.innerHTML = `<div class="bubble">${esc(text)}</div>`
-    chatArea.appendChild(el)
-    scrollDown()
+function Loading() {
+    return (
+        <div className="loading">
+            <div className="dots"><span /><span /><span /></div>
+            <span>Agent is working...</span>
+        </div>
+    )
 }
 
-function appendLoading(): HTMLElement {
+function Divider({ text }: { text: string }) {
+    return <div className="divider">{text}</div>
+}
+
+function Card({ type, label, content }: { type: string; label: string; content: string }) {
+    return (
+        <div className={`card card-${type}`}>
+            <div className="card-label">{label}</div>
+            <div className="card-body">{content}</div>
+        </div>
+    )
+}
+
+function ObjectiveItem({ obj }: { obj: { name: string; description: string; met?: boolean; reason?: string } }) {
+    const status = obj.met === undefined ? '' : obj.met ? 'met' : 'unmet'
+    const icon = obj.met === undefined ? '⏳' : obj.met ? '✅' : '❌'
+    return (
+        <div className={`obj-item ${status}`} data-obj={obj.name}>
+            <span className="obj-icon">{icon}</span>
+            <div className="obj-info">
+                <span className="obj-name">{obj.name}</span>
+                <span className="obj-desc">{obj.description}</span>
+                {obj.reason && <span className="obj-reason">{obj.reason}</span>}
+            </div>
+        </div>
+    )
+}
+
+function ObjectivesPanel({ objectives }: { objectives: typeof state.objectives }) {
+    return (
+        <div className="card card-planning">
+            <div className="card-label">📋 Planned Objectives</div>
+            <div className="obj-grid">
+                {objectives.map(o => <ObjectiveItem obj={o} />)}
+            </div>
+        </div>
+    )
+}
+
+function ToolCard({ name, params, result }: {
+    name: string
+    params: Record<string, any>
+    result?: { success: boolean; output: string; error?: string }
+}) {
+    const badgeClass = !result ? 'running' : result.success ? 'success' : 'failure'
+    const badgeText = !result ? 'running' : result.success ? 'success' : 'failed'
+    const output = result ? (result.output || result.error || '') : ''
+    return (
+        <div className="card card-tool">
+            <div className="tool-header">
+                <span className="tool-name">{name}</span>
+                <span className={`tool-badge ${badgeClass}`}>{badgeText}</span>
+            </div>
+            <pre className="tool-params">{JSON.stringify(params, null, 2)}</pre>
+            {output && <pre className="tool-output">{output.substring(0, 500)}</pre>}
+        </div>
+    )
+}
+
+// ── Render helpers ──
+
+/** Render JSX into a new container appended to the chat area, return the container */
+function appendJsx(jsx: any): HTMLElement {
     const el = document.createElement('div')
-    el.className = 'loading'
-    el.innerHTML = `<div class="dots"><span></span><span></span><span></span></div><span>Agent is working...</span>`
     chatArea.appendChild(el)
+    render(jsx, el)
     scrollDown()
     return el
 }
 
+function appendUserBubble(text: string) {
+    appendJsx(<UserBubble text={text} />)
+}
+
+function appendLoading(): HTMLElement {
+    return appendJsx(<Loading />)
+}
+
 function appendDivider(text: string) {
-    const el = document.createElement('div')
-    el.className = 'divider'
-    el.textContent = text
-    chatArea.appendChild(el)
-    scrollDown()
+    appendJsx(<Divider text={text} />)
 }
 
 function appendCard(type: string, label: string, content: string) {
-    const el = document.createElement('div')
-    el.className = `card card-${type}`
-    el.innerHTML = `<div class="card-label">${esc(label)}</div><div class="card-body">${esc(content)}</div>`
-    chatArea.appendChild(el)
-    scrollDown()
+    appendJsx(<Card type={type} label={label} content={content} />)
 }
 
+let objectivesPanelEl: HTMLElement | null = null
+
 function appendObjectivesPanel() {
-    const el = document.createElement('div')
-    el.className = 'card card-planning'
-    el.id = 'objectives-panel'
-    el.innerHTML = `
-        <div class="card-label">📋 Planned Objectives</div>
-        <div class="obj-grid">
-            ${state.objectives.map(o => `
-                <div class="obj-item" data-obj="${esc(o.name)}">
-                    <span class="obj-icon">⏳</span>
-                    <div class="obj-info">
-                        <span class="obj-name">${esc(o.name)}</span>
-                        <span class="obj-desc">${esc(o.description)}</span>
-                        <span class="obj-reason"></span>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `
-    chatArea.appendChild(el)
-    scrollDown()
+    objectivesPanelEl = appendJsx(<ObjectivesPanel objectives={state.objectives} />)
 }
 
 function updateObjectives(results: Array<{ name: string; met: boolean; reason: string }>) {
-    const panel = document.getElementById('objectives-panel')
-    if (!panel) return
+    if (!objectivesPanelEl) return
+    // Update state and re-render the panel
     for (const r of results) {
-        const item = panel.querySelector(`[data-obj="${r.name}"]`) as HTMLElement | null
-        if (!item) continue
-        item.className = `obj-item ${r.met ? 'met' : 'unmet'}`
-        item.querySelector('.obj-icon')!.textContent = r.met ? '✅' : '❌'
-        item.querySelector('.obj-reason')!.textContent = r.reason
+        const obj = state.objectives.find(o => o.name === r.name)
+        if (obj) {
+            obj.met = r.met
+            obj.reason = r.reason
+        }
     }
+    render(<ObjectivesPanel objectives={state.objectives} />, objectivesPanelEl)
     scrollDown()
 }
 
+// Tool cards — track them for result updates
+const toolCards: Array<{ el: HTMLElement; name: string; params: Record<string, any>; result?: any }> = []
+
 function appendToolCard(name: string, params: Record<string, any>) {
-    const el = document.createElement('div')
-    el.className = 'card card-tool'
-    el.innerHTML = `
-        <div class="tool-header">
-            <span class="tool-name">${esc(name)}</span>
-            <span class="tool-badge running">running</span>
-        </div>
-        <pre class="tool-params">${esc(JSON.stringify(params, null, 2))}</pre>
-    `
-    chatArea.appendChild(el)
-    scrollDown()
+    const entry = { el: null as any, name, params }
+    entry.el = appendJsx(<ToolCard name={name} params={params} />)
+    toolCards.push(entry)
 }
 
 function updateLastTool(result: { success: boolean; output: string; error?: string }) {
-    const cards = chatArea.querySelectorAll('.card-tool')
-    const card = cards[cards.length - 1] as HTMLElement | null
-    if (!card) return
-
-    const badge = card.querySelector('.tool-badge') as HTMLElement
-    badge.className = `tool-badge ${result.success ? 'success' : 'failure'}`
-    badge.textContent = result.success ? 'success' : 'failed'
-
-    const output = result.output || result.error || ''
-    if (output) {
-        const pre = document.createElement('pre')
-        pre.className = 'tool-output'
-        pre.textContent = output.substring(0, 500)
-        card.appendChild(pre)
-    }
+    const entry = toolCards[toolCards.length - 1]
+    if (!entry) return
+    entry.result = result
+    render(<ToolCard name={entry.name} params={entry.params} result={result} />, entry.el)
     scrollDown()
 }
 
