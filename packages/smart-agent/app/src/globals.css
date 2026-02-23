@@ -1328,6 +1328,58 @@ body {
 /* ══════════════════════════════════════
    MARKDOWN RENDERING
    ══════════════════════════════════════ */
+.bubble .md-code-wrapper {
+    margin: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+}
+
+.bubble .md-code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 10px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+}
+
+.bubble .md-code-lang {
+    color: var(--text-3);
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.bubble .md-copy-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all .15s;
+}
+
+.bubble .md-copy-btn:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+    background: var(--bg-3);
+}
+
+.bubble .md-copy-btn.copied {
+    color: var(--green);
+    border-color: var(--green);
+}
+
+.bubble .md-code-wrapper .md-code-block {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+}
+
 .bubble .md-code-block {
     background: var(--bg-0);
     border: 1px solid var(--border);

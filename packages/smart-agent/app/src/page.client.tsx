@@ -130,9 +130,15 @@ export default function mount() {
             createAgent()
             inputEl.focus()
         }
-        // Escape — close settings
+        // Ctrl+L — clear current agent chat
+        if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+            e.preventDefault()
+            clearCurrentChat()
+        }
+        // Escape — close settings or stop agent
         if (e.key === 'Escape') {
-            closeSettings()
+            if (state.isRunning) stopAgent()
+            else closeSettings()
         }
     })
 
@@ -150,6 +156,19 @@ export default function mount() {
 
     // Overview resize
     setupResizeHandle()
+
+    // Code block copy button delegation
+    chatArea.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest('.md-copy-btn') as HTMLElement | null
+        if (!btn) return
+        const code = btn.dataset.code || ''
+        // Decode HTML entities back to raw text
+        const decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+        navigator.clipboard.writeText(decoded)
+        btn.textContent = '✓ Copied'
+        btn.classList.add('copied')
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied') }, 1500)
+    })
 
     // Restore persisted state
     restoreState()
@@ -336,6 +355,25 @@ function selectAgent(id: string) {
     renderSchedulePane()
     renderSidebar()
     saveState()
+}
+
+function clearCurrentChat() {
+    if (state.isRunning || !state.activeAgentId) return
+    const agent = getActiveAgent()
+    if (!agent) return
+
+    // Reset chat and session
+    chatArea.innerHTML = ''
+    state.objectives = []
+    state.files = []
+    toolCards.length = 0
+    agent.sessionId = null
+    agentChatStore.delete(agent.id)
+    renderObjectivesPane()
+    renderFilesPane()
+    renderSidebar()
+    saveState()
+    inputEl.focus()
 }
 
 function getActiveAgent(): AgentEntry | null {
@@ -868,7 +906,13 @@ function renderMarkdown(text: string): string {
     const codeBlocks: string[] = []
     text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (_: string, lang: string, code: string) => {
         const idx = codeBlocks.length
-        codeBlocks.push(`<pre class="md-code-block"><code class="lang-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`)
+        const langLabel = lang || 'text'
+        codeBlocks.push(
+            `<div class="md-code-wrapper">` +
+            `<div class="md-code-header"><span class="md-code-lang">${langLabel}</span><button class="md-copy-btn" data-code="${escapeHtml(code.trim()).replace(/"/g, '&quot;')}">Copy</button></div>` +
+            `<pre class="md-code-block"><code class="lang-${langLabel}">${escapeHtml(code.trim())}</code></pre>` +
+            `</div>`
+        )
         return `\x00CODE${idx}\x00`
     })
 
