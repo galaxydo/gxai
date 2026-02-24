@@ -432,3 +432,62 @@ describe("Objectives", () => {
     })
 })
 
+// ── Session Tests ──
+
+import { Session } from "./session"
+
+describe("Session", () => {
+    test("constructor generates unique id", () => {
+        const s1 = new Session({ model: "test" })
+        const s2 = new Session({ model: "test" })
+        expect(s1.id).toBeTruthy()
+        expect(s2.id).toBeTruthy()
+        expect(s1.id).not.toBe(s2.id)
+    })
+
+    test("requireConfirmation defaults to true", () => {
+        const session = new Session({ model: "test" })
+        expect(session.requireConfirmation).toBe(true)
+    })
+
+    test("requireConfirmation can be disabled", () => {
+        const session = new Session({ model: "test", requireConfirmation: false })
+        expect(session.requireConfirmation).toBe(false)
+    })
+
+    test("history starts empty", () => {
+        const session = new Session({ model: "test" })
+        expect(session.getHistory()).toEqual([])
+    })
+
+    test("objectives start empty", () => {
+        const session = new Session({ model: "test" })
+        expect(session.getObjectives()).toEqual([])
+    })
+
+    test("isAwaitingConfirmation starts false", () => {
+        const session = new Session({ model: "test" })
+        expect(session.isAwaitingConfirmation).toBe(false)
+    })
+
+    test("confirmObjectives is safe to call when not awaiting", () => {
+        const session = new Session({ model: "test" })
+        // Should not throw
+        session.confirmObjectives()
+        expect(session.isAwaitingConfirmation).toBe(false)
+    })
+
+    test("rejectObjectives is safe to call when not awaiting", () => {
+        const session = new Session({ model: "test" })
+        // Should not throw
+        session.rejectObjectives()
+        expect(session.isAwaitingConfirmation).toBe(false)
+    })
+
+    test("abort is safe to call when nothing running", () => {
+        const session = new Session({ model: "test" })
+        // Should not throw
+        session.abort()
+        expect(session.isAwaitingConfirmation).toBe(false)
+    })
+})

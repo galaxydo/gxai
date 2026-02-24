@@ -2,7 +2,8 @@
 import { measure, measureSync } from "measure-fn"
 import { Session } from "../../../../src"
 import type { AgentConfig } from "../../../../src"
-import { addMessage } from "../../../../src/db"
+// DB persistence stub (db module was removed)
+const addMessage = (_agentId: number, _role: string, _content: string) => { }
 import { join } from "path"
 import { readdirSync } from "fs"
 

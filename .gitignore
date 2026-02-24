@@ -34,3 +34,20 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 *.db
+
+# config
+.config.toml
+
+# lock files
+bun.lock
+
+# bench artifacts
+**/bench/logs/
+**/bench/results.json
+**/bench/output.txt
+
+# generated images
+*.png
+
+# misc
+.artifacts/

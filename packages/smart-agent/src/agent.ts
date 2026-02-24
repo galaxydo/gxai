@@ -16,8 +16,12 @@ import type {
 import { createBuiltinTools } from "./tools"
 import { callLLM, streamLLM } from "./llm"
 import { loadSkills, formatSkillsForPrompt } from "./skills"
-import { objToXml, xmlToObj } from "./xml"
 import { hydrateObjective, PLANNER_SYSTEM_PROMPT } from "./objectives"
+
+// jsx-ai — strategy-agnostic LLM caller with native tool support
+import { callLLM as jsxCallLLM } from "../../jsx-ai/src/index"
+import { jsx, Fragment } from "../../jsx-ai/src/jsx-runtime"
+import type { LLMResponse } from "../../jsx-ai/src/types"
 
 export class Agent {
     private config: Required<Pick<AgentConfig, "model" | "maxIterations" | "temperature" | "maxTokens" | "cwd" | "toolTimeoutMs">> & AgentConfig
@@ -196,37 +200,34 @@ export class Agent {
             yield { type: "iteration_start", iteration: i, elapsed: Date.now() - startTime }
 
             try {
-                // ── Call LLM (streaming) ──
-                let llmResponse = ""
-                for await (const chunk of streamLLM(
-                    this.config.model,
-                    state.messages.map(m => ({
-                        role: m.role === "tool" ? "user" : m.role,
-                        content: m.content,
-                    })),
-                    { temperature: this.config.temperature, maxTokens: this.config.maxTokens },
-                )) {
-                    llmResponse += chunk
-                    yield { type: "thinking_delta", iteration: i, delta: chunk }
-                }
+                // ── Call LLM via jsx-ai (strategy-agnostic) ──
+                const llmResult = await measure(`LLM ${this.config.model}`, () =>
+                    this.callWithJsxAi(state.messages)
+                ) as LLMResponse
 
-                if (!llmResponse) {
+                if (!llmResult) {
                     yield { type: "error", iteration: i, error: "LLM returned empty response" }
                     state.messages.push({ role: "user", content: "Empty response. Try again." })
                     continue
                 }
 
-                state.messages.push({ role: "assistant", content: llmResponse })
+                // Store assistant message (text or summary of tool calls)
+                const assistantContent = llmResult.text ||
+                    (llmResult.toolCalls.length > 0
+                        ? llmResult.toolCalls.map(tc => `${tc.name}(${JSON.stringify(tc.args)})`).join(", ")
+                        : "(empty)")
+                state.messages.push({ role: "assistant", content: assistantContent })
 
-                // ── Parse structured XML response ──
-                const parsed = measureSync('Parse XML response', () => this.parseResponse(llmResponse))!
-
-                if (parsed.message) {
-                    yield { type: "thinking", iteration: i, message: parsed.message }
+                if (llmResult.text) {
+                    yield { type: "thinking", iteration: i, message: llmResult.text }
                 }
 
-                // ── Execute tools ──
-                const invocations: ToolInvocation[] = parsed.tool_invocations || []
+                // ── Execute tool calls (from jsx-ai's structured response) ──
+                const invocations: ToolInvocation[] = llmResult.toolCalls.map(tc => ({
+                    tool: tc.name,
+                    params: tc.args,
+                    reasoning: "",
+                }))
 
                 if (invocations.length > 0) {
                     const toolMessages: string[] = []
@@ -298,6 +299,57 @@ export class Agent {
         yield { type: "max_iterations", iteration: this.config.maxIterations }
     }
 
+    // ── jsx-ai integration ──
+
+    /**
+     * Build a JSX tree and call the LLM via jsx-ai.
+     * jsx-ai picks the best strategy automatically (hybrid for Gemini).
+     * The agent doesn't care whether tools are sent as XML, natural language, or native FC.
+     */
+    private async callWithJsxAi(messages: Message[]): Promise<LLMResponse> {
+        const h = jsx
+
+        // Build tool nodes from registered tools
+        const toolNodes = [...this.tools.values()].map(t =>
+            h("tool", {
+                name: t.name,
+                description: t.description,
+                children: Object.entries(t.parameters).map(([name, p]) =>
+                    h("param", {
+                        name,
+                        type: p.type,
+                        required: p.required,
+                        children: p.description,
+                    })
+                ),
+            })
+        )
+
+        // Build message nodes from conversation history
+        const messageNodes = messages.map(m => {
+            if (m.role === "system") {
+                return h("system", { children: m.content })
+            }
+            return h("message", {
+                role: m.role === "tool" ? "user" : m.role as "user" | "assistant",
+                children: m.content,
+            })
+        })
+
+        // Assemble the prompt tree
+        const tree = h("prompt", {
+            model: this.config.model,
+            temperature: this.config.temperature,
+            maxTokens: this.config.maxTokens,
+            children: [
+                ...messageNodes,
+                ...toolNodes,
+            ],
+        })
+
+        return await jsxCallLLM(tree)
+    }
+
     // ── Internal ──
 
     private buildSystemPrompt(): string {
@@ -305,15 +357,6 @@ export class Agent {
     }
 
     private buildSystemPromptInner(): string {
-        const toolDescriptions = [...this.tools.values()]
-            .map(t => {
-                const params = Object.entries(t.parameters)
-                    .map(([name, p]) => `    - ${name} (${p.type}${p.required ? ", required" : ""}): ${p.description}`)
-                    .join("\n")
-                return `  ${t.name}: ${t.description}\n    Parameters:\n${params}`
-            })
-            .join("\n\n")
-
         const objectiveList = this.objectives
             .map((o, i) => `  ${i + 1}. [${o.name}] ${o.description}`)
             .join("\n")
@@ -326,34 +369,18 @@ export class Agent {
         )
 
         const conversationalHint = isConversational
-            ? `\n\nNOTE: These objectives are conversational — just provide a helpful response in the <message> tag. No tools needed.`
+            ? `\n\nNOTE: These objectives are conversational — just provide a helpful response. No tools needed.`
             : ""
 
+        // No more XML format instructions — jsx-ai handles all of that
         return `You are an autonomous agent that works toward objectives using tools.
 You operate in a loop: analyze state → invoke tools → repeat until all objectives are met.
-
-AVAILABLE TOOLS:
-${toolDescriptions}
 ${this.skillsPrompt}
 
 OBJECTIVES (all must be met to complete):
 ${objectiveList}
 ${conversationalHint}
 ${custom}
-
-RESPONSE FORMAT (XML):
-<response>
-  <message>What you're doing and why</message>
-  <tool_invocations>
-    <invocation>
-      <tool>tool_name</tool>
-      <params>
-        <param_name>value</param_name>
-      </params>
-      <reasoning>Why this tool call</reasoning>
-    </invocation>
-  </tool_invocations>
-</response>
 
 RULES:
 1. Use available tools to make progress toward ALL objectives
@@ -363,48 +390,9 @@ RULES:
 5. If a tool fails twice, try an alternative approach or explain why it can't be done
 6. When writing code, ensure it is correct and complete
 7. Keep messages concise but informative
-8. If the objective just asks for a response (explanation, joke, advice), put your answer in the <message> tag — no tools needed
+8. If the objective just asks for a response (explanation, joke, advice), just respond — no tools needed
 9. On Windows, use PowerShell commands: 'Get-ChildItem' not 'ls', 'Get-Content' not 'cat'
-10. If you cannot make progress, explain the blocker in <message> — do NOT repeat failed actions`
-    }
-
-    private parseResponse(raw: string): {
-        message: string
-        tool_invocations: ToolInvocation[]
-    } {
-        try {
-            const parsed = xmlToObj(raw)
-            const root = parsed.response || parsed
-
-            // Parse tool invocations
-            const toolInvocations: ToolInvocation[] = []
-            const toolSection = root.tool_invocations
-            if (toolSection) {
-                const invocations = toolSection.invocation
-                    ? (Array.isArray(toolSection.invocation) ? toolSection.invocation : [toolSection.invocation])
-                    : []
-                for (const inv of invocations) {
-                    const params: Record<string, any> = {}
-                    if (inv.params && typeof inv.params === "object") {
-                        for (const [k, v] of Object.entries(inv.params)) {
-                            params[k] = v
-                        }
-                    }
-                    toolInvocations.push({
-                        tool: String(inv.tool || ""),
-                        params,
-                        reasoning: String(inv.reasoning || ""),
-                    })
-                }
-            }
-
-            return {
-                message: String(root.message || ""),
-                tool_invocations: toolInvocations,
-            }
-        } catch {
-            return { message: raw.substring(0, 500), tool_invocations: [] }
-        }
+10. If you cannot make progress, explain the blocker — do NOT repeat failed actions`
     }
 
     private async checkObjectives(state: AgentState): Promise<Array<{ name: string; met: boolean; reason: string }>> {
