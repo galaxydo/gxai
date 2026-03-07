@@ -48,7 +48,8 @@ export function xmlToObj(xmlContent: string): any {
     let hasMatches = false;
     while ((match = tagRegex.exec(content)) !== null) {
       hasMatches = true;
-      const [, tagName, tagContent] = match;
+      const tagName = match[1]!;
+      const tagContent = match[2]!;
       let child: any;
       if (tagContent.trim().includes("<")) {
         child = parseElement(tagContent);
@@ -74,9 +75,9 @@ export function xmlToObj(xmlContent: string): any {
 
     // Unwrap 'item' arrays for better array representation
     if (Object.keys(result).length === 1) {
-      const [key, val] = Object.entries(result)[0];
-      if (key === "item") {
-        return Array.isArray(val) ? val : [val];
+      const entry = Object.entries(result)[0];
+      if (entry && entry[0] === "item") {
+        return Array.isArray(entry[1]) ? entry[1] : [entry[1]];
       }
     }
 

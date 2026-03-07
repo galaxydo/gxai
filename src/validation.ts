@@ -34,26 +34,26 @@ export function validateNoArrays(schema: z.ZodObject<any>, path: string = ''): v
 
     // Unwrap optional/nullable
     let currentSchema = fieldSchema as z.ZodType<any>;
-    while (currentSchema._def.typeName === 'ZodOptional' || currentSchema._def.typeName === 'ZodNullable') {
-      currentSchema = currentSchema.unwrap();
+    while ((currentSchema._def as any).typeName === 'ZodOptional' || (currentSchema._def as any).typeName === 'ZodNullable') {
+      currentSchema = (currentSchema as any).unwrap();
     }
 
-    if (currentSchema._def.typeName === 'ZodArray') {
+    if ((currentSchema._def as any).typeName === 'ZodArray') {
       throw new Error(`Arrays are not supported in output schema. Found array at path: ${currentPath}. Use individual fields like ${key}_1, ${key}_2 instead.`);
     }
 
-    if (currentSchema._def.typeName === 'ZodObject') {
-      validateNoArrays(currentSchema, currentPath);
+    if ((currentSchema._def as any).typeName === 'ZodObject') {
+      validateNoArrays(currentSchema as z.ZodObject<any>, currentPath);
     }
   }
 }
 
 /** Gets the type name of a Zod schema, unwrapping optional/nullable types. */
 export function getSchemaTypeName(schema: z.ZodType<any>): string {
-  if (schema._def.typeName === "ZodOptional" || schema._def.typeName === "ZodNullable") {
-    return getSchemaTypeName(schema.unwrap());
+  if ((schema._def as any).typeName === "ZodOptional" || (schema._def as any).typeName === "ZodNullable") {
+    return getSchemaTypeName((schema as any).unwrap());
   }
-  return schema._def.typeName;
+  return (schema._def as any).typeName;
 }
 
 if (import.meta.env.NODE_ENV === "test") {
