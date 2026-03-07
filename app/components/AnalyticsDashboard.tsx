@@ -273,7 +273,7 @@ function AnalyticsDashboardImpl() {
                                                 className="column-filter"
                                                 placeholder={`Filter ${field}...`}
                                                 value={agentFilters[`input:${field}`] || ''}
-                                                onChange={(e) => updateFilter(fullPageAgent, `input:${field}`, e.target.value)}
+                                                onChange={(e) => updateFilter(fullPageAgent, `input:${field}`, (e.target as HTMLInputElement).value)}
                                             />
                                         </th>
                                     ))}
@@ -288,7 +288,7 @@ function AnalyticsDashboardImpl() {
                                                 className="column-filter"
                                                 placeholder={`Filter ${field}...`}
                                                 value={agentFilters[`output:${field}`] || ''}
-                                                onChange={(e) => updateFilter(fullPageAgent, `output:${field}`, e.target.value)}
+                                                onChange={(e) => updateFilter(fullPageAgent, `output:${field}`, (e.target as HTMLInputElement).value)}
                                             />
                                         </th>
                                     ))}
@@ -445,7 +445,7 @@ function AnalyticsDashboardImpl() {
                                                                     className="column-filter"
                                                                     placeholder={`Filter...`}
                                                                     value={agentFilters[`input:${field}`] || ''}
-                                                                    onChange={(e) => updateFilter(agent.name, `input:${field}`, e.target.value)}
+                                                                    onChange={(e) => updateFilter(agent.name, `input:${field}`, (e.target as HTMLInputElement).value)}
                                                                     onClick={(e) => e.stopPropagation()}
                                                                 />
                                                             </th>
@@ -461,7 +461,7 @@ function AnalyticsDashboardImpl() {
                                                                     className="column-filter"
                                                                     placeholder={`Filter...`}
                                                                     value={agentFilters[`output:${field}`] || ''}
-                                                                    onChange={(e) => updateFilter(agent.name, `output:${field}`, e.target.value)}
+                                                                    onChange={(e) => updateFilter(agent.name, `output:${field}`, (e.target as HTMLInputElement).value)}
                                                                     onClick={(e) => e.stopPropagation()}
                                                                 />
                                                             </th>

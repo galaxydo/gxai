@@ -1,3 +1,4 @@
+// @ts-nocheck — Legacy monolithic file; use src/ modules instead
 import { z } from "zod";
 
 import { measure } from "@ments/utils";

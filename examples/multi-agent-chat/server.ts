@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const appDir = join(__dirname, 'app');
-const port = parseInt(process.argv[2]) || 3003;
+const port = parseInt(process.argv[2] ?? '') || 3003;
 
 console.log(`🤖 Starting Multi-Agent Chat...`);
 console.log(`📂 App directory: ${appDir}`);

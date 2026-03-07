@@ -1,4 +1,4 @@
-import { objToXml, xmlToObj } from 'gxai';
+import { objToXml, xmlToObj } from '../src/xml';
 
 import { measureSync } from '@ments/utils';
 
@@ -60,12 +60,12 @@ if (import.meta.env.NODE_ENV === "test") {
         }),
       });
       expect(openaiResponse.ok).toBe(true);
-      const openaiData = await openaiResponse.json();
+      const openaiData = await openaiResponse.json() as any;
       const xmlResponseStr = openaiData.choices[0].message.content.trim();
       measureSync(xmlResponseStr);
 
       // Parse the expected XML response into object
-      const parsedResponseObj = xmlToObj(xmlResponseStr, 'response'); // Assume root is <response>
+      const parsedResponseObj = xmlToObj(xmlResponseStr);
       expect(parsedResponseObj).toHaveProperty('temperature');
       expect(typeof parsedResponseObj.temperature).toBe('string'); // Or number if parsed further
       expect(parsedResponseObj).toHaveProperty('humidity');

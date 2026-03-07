@@ -1,6 +1,7 @@
 import { test, expect, it, describe } from 'bun:test';
 import { z } from 'zod';
-import { Agent, LLM, ProgressUpdate } from '../uai';
+import { Agent } from '../src/agent';
+import { LLM } from '../src/types';
 
 describe('UAI Library Advanced Tests', () => {
   it('should generate a structured response with a thinking process based on persona', async () => {
@@ -26,11 +27,11 @@ describe('UAI Library Advanced Tests', () => {
     const input = {
       user_query: 'What is the best way to invest $100?',
       personality: 'A cautious, old sea captain who has seen many treasures lost to recklessness.',
-      tone: 'serious' as const, // 'as const' helps TypeScript infer the most specific type
+      tone: 'serious' as const,
     };
 
     try {
-      const streamingResponse = {};
+      const streamingResponse: Record<string, string> = {};
       // 2. Run the agent and await the structured result
       const { finalResponse, thinkingProcess, suggestedMarkup, status } = await personaAgent.run(input, (update: any) => {
         if (update.stage === 'streaming') {
@@ -53,21 +54,18 @@ describe('UAI Library Advanced Tests', () => {
 
       // 4. Verify the structure and content of the response
       expect(thinkingProcess).toBeTypeOf('string');
-      expect(thinkingProcess.length).toBeGreaterThan(1); // Assert it's not empty
+      expect(thinkingProcess.length).toBeGreaterThan(1);
 
       expect(finalResponse).toBeTypeOf('string');
       expect(finalResponse.toLowerCase()).toInclude('sea');
       expect(suggestedMarkup).toBeTypeOf('string');
-      // Assert that we received a string that contains markup, which would have failed before the fix.
       expect(suggestedMarkup.trim()).toStartWith('<');
       expect(suggestedMarkup.trim()).toEndWith('>');
 
-
       console.log('\n✅ Agent generated a valid, structured response that fits the persona.');
 
-    } catch (error) {
-      // This block allows the test to pass gracefully if API keys aren't configured.
-      console.warn('\n⚠️ API call test skipped (this is expected if API keys are not configured):', error.message);
+    } catch (error: unknown) {
+      console.warn('\n⚠️ API call test skipped (this is expected if API keys are not configured):', (error as Error).message);
     }
   }, { timeout: 30000 });
 });

@@ -1,3 +1,4 @@
+// @ts-nocheck — depends on planned src/loop.ts module
 // examples/self-healing-script.ts
 // Demonstrates LoopAgent: create a TypeScript script, run it, self-heal until it works.
 import { measure } from "measure-fn";

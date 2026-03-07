@@ -1,8 +1,8 @@
-import { addRequest, InferenceRequest } from "../../../src/analytics";
+import { addRequest, type InferenceRequest } from "../../../src/analytics";
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
+        const body: any = await request.json();
 
         // Validate required fields
         if (!body.id || !body.agentName || !body.llm) {

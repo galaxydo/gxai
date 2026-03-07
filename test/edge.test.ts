@@ -1,6 +1,7 @@
 import { test, expect, it, describe } from 'bun:test';
 import { z } from 'zod';
-import { Agent, LLM, ProgressUpdate } from '../uai';
+import { Agent } from '../src/agent';
+import { LLM } from '../src/types';
 
 describe('UAI Library Tests', () => {
   it('should process complex input validation successfully', async () => {
@@ -50,9 +51,10 @@ describe('UAI Library Tests', () => {
         },
       });
       console.log('✅ Complex input validation and processing successful');
-    } catch (error) {
-      console.warn('⚠️ API call test skipped (possibly due to API keys):', error.message);
-      if (!error.message.includes('API') && !error.message.includes('401') && !error.message.includes('403')) {
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
+      console.warn('⚠️ API call test skipped (possibly due to API keys):', msg);
+      if (!msg.includes('API') && !msg.includes('401') && !msg.includes('403')) {
         throw error;
       }
     }
@@ -66,7 +68,7 @@ describe('UAI Library Tests', () => {
           message: z.string(),
         }),
         outputFormat: z.object({
-          responses: z.array(z.string()), // This should throw an error
+          responses: z.array(z.string()),
         }),
       });
     }).toThrow('Arrays are not supported in output schema. Found array at path: responses. Use individual fields like responses_1, responses_2 instead.');
@@ -83,7 +85,7 @@ describe('UAI Library Tests', () => {
         }),
         outputFormat: z.object({
           data: z.object({
-            items: z.array(z.string()), // Nested array should also throw
+            items: z.array(z.string()),
           }),
         }),
       });
@@ -106,12 +108,12 @@ describe('UAI Library Tests', () => {
 
     try {
       await agent.run({
-        message: 123 as any, // Wrong type
-        count: 'not a number' as any, // Wrong type
+        message: 123 as any,
+        count: 'not a number' as any,
       });
-      expect(false).toBe(true); // Should not reach here
-    } catch (error) {
-      expect(error.name).toBe('ZodError');
+      expect(false).toBe(true);
+    } catch (error: unknown) {
+      expect((error as Error).name).toBe('ZodError');
       console.log('✅ Input type validation working correctly');
     }
   });
@@ -131,18 +133,18 @@ describe('UAI Library Tests', () => {
     try {
       await agent.run({
         message: 'test',
-        priority: 'invalid_priority' as any, // Invalid enum value
+        priority: 'invalid_priority' as any,
       });
-      expect(false).toBe(true); // Should not reach here
-    } catch (error) {
-      expect(error.name).toBe('ZodError');
+      expect(false).toBe(true);
+    } catch (error: unknown) {
+      expect((error as Error).name).toBe('ZodError');
       console.log('✅ Enum validation working correctly');
     }
   });
 
   it('should support all LLM model configurations', () => {
     const models = [LLM.gpt4o, LLM.gpt4, LLM.claude, LLM.deepseek];
-    
+
     for (const model of models) {
       const agent = new Agent({
         llm: model,
@@ -179,12 +181,12 @@ describe('UAI Library Tests', () => {
     try {
       await agent.run({
         required: 'test value',
-        // optional field omitted
       });
       console.log('✅ Optional fields handled correctly');
-    } catch (error) {
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
       console.warn('⚠️ Optional fields test skipped due to API limitations');
-      if (!error.message.includes('API') && !error.message.includes('401') && !error.message.includes('403')) {
+      if (!msg.includes('API') && !msg.includes('401') && !msg.includes('403')) {
         throw error;
       }
     }
@@ -209,9 +211,10 @@ describe('UAI Library Tests', () => {
         nullable: null,
       });
       console.log('✅ Nullable fields handled correctly');
-    } catch (error) {
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
       console.warn('⚠️ Nullable fields test skipped due to API limitations');
-      if (!error.message.includes('API') && !error.message.includes('401') && !error.message.includes('403')) {
+      if (!msg.includes('API') && !msg.includes('401') && !msg.includes('403')) {
         throw error;
       }
     }

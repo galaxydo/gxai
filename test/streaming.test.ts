@@ -1,22 +1,23 @@
 import { test, expect, it, describe } from 'bun:test';
 import { z } from 'zod';
-import { agent, llm, progressupdate, streamingupdate } from '../uai';
+import { Agent } from '../src/agent';
+import type { ProgressUpdate, StreamingUpdate } from '../src/types';
 
 describe('uai streaming tests', () => {
   it('should emit streaming progress updates token-by-token', async () => {
-    const streamingagent = new agent({
-      llm: 'o4-mini-2025-04-16',
-      inputformat: z.object({
+    const streamingAgent = new Agent({
+      llm: 'gpt-4o-mini' as any,
+      inputFormat: z.object({
         question: z.string(),
       }),
-      outputformat: z.object({
+      outputFormat: z.object({
         analysis: z.object({
-          step1: z.string(), // nested fieild should be named like analysis_step1
+          step1: z.string(),
           step2: z.string(),
           step3: z.string(),
         }).describe("step-by-step analysis of the question"),
         answer: z.string().describe("the final short concise answer to the question"),
-        status: z.string().describe("just literal word ok"), // to ensure streaming single-word responses
+        status: z.string().describe("just literal word ok"),
       }),
       temperature: 0.7,
     });
@@ -25,16 +26,16 @@ describe('uai streaming tests', () => {
       question: 'what are the benefits of renewable energy?',
     };
 
-    const streamingupdates: streamingupdate[] = [];
-    const progressupdates: progressupdate[] = [];
+    const streamingUpdates: StreamingUpdate[] = [];
+    const progressUpdates: ProgressUpdate[] = [];
 
     try {
-      const result = await streamingagent.run(input, (update) => {
+      const result = await streamingAgent.run(input, (update) => {
         if (update.stage === 'streaming') {
-          streamingupdates.push(update as streamingupdate);
-          console.log(`field: ${update.field}, value: ${update.value}`);
+          streamingUpdates.push(update as unknown as StreamingUpdate);
+          console.log(`field: ${(update as any).field}, value: ${(update as any).value}`);
         } else {
-          progressupdates.push(update);
+          progressUpdates.push(update);
         }
       });
 
@@ -43,36 +44,36 @@ describe('uai streaming tests', () => {
       console.log('answer:', result.answer);
 
       // verify we received streaming updates
-      expect(streamingupdates.length).tobegreaterthan(0);
+      expect(streamingUpdates.length).toBeGreaterThan(0);
 
       // verify we have updates for both fields
-      const fieldsupdated = new set(streamingupdates.map(u => u.field));
-      expect(fieldsupdated.has('analysis')).tobe(true);
-      expect(fieldsupdated.has('answer')).tobe(true);
+      const fieldsUpdated = new Set(streamingUpdates.map(u => u.field));
+      expect(fieldsUpdated.has('analysis')).toBe(true);
+      expect(fieldsUpdated.has('answer')).toBe(true);
 
       // verify the streaming updates show progressive content building
-      const analysisupdates = streamingupdates.filter(u => u.field === 'analysis');
-      const answerupdates = streamingupdates.filter(u => u.field === 'answer');
+      const analysisUpdates = streamingUpdates.filter(u => u.field === 'analysis');
+      const answerUpdates = streamingUpdates.filter(u => u.field === 'answer');
 
-      expect(analysisupdates.length).tobegreaterthan(1);
-      expect(answerupdates.length).tobegreaterthan(1);
+      expect(analysisUpdates.length).toBeGreaterThan(1);
+      expect(answerUpdates.length).toBeGreaterThan(1);
 
-      // verify content is progressively building (each update should contain more text)
-      for (let i = 1; i < analysisupdates.length; i++) {
-        expect(analysisupdates[i].value.length).tobegreaterthanorequal(analysisupdates[i - 1].value.length);
+      // verify content is progressively building
+      for (let i = 1; i < analysisUpdates.length; i++) {
+        expect(analysisUpdates[i]!.value.length).toBeGreaterThanOrEqual(analysisUpdates[i - 1]!.value.length);
       }
 
       // verify final result matches last streaming update values
-      const lastanalysisupdate = analysisupdates[analysisupdates.length - 1];
-      const lastanswerupdate = answerupdates[answerupdates.length - 1];
+      const lastAnalysisUpdate = analysisUpdates[analysisUpdates.length - 1]!;
+      const lastAnswerUpdate = answerUpdates[answerUpdates.length - 1]!;
 
-      expect(result.analysis.trim()).tobe(lastanalysisupdate.value.trim());
-      expect(result.answer.trim()).tobe(lastanswerupdate.value.trim());
+      expect(JSON.stringify(result.analysis)).toBe(lastAnalysisUpdate.value.trim());
+      expect(result.answer.trim()).toBe(lastAnswerUpdate.value.trim());
 
-      console.log(`\n✅ received ${streamingupdates.length} streaming updates across ${fieldsupdated.size} fields`);
+      console.log(`\n✅ received ${streamingUpdates.length} streaming updates across ${fieldsUpdated.size} fields`);
 
-    } catch (error) {
-      console.warn('\n⚠️ streaming test skipped (this is expected if api keys are not configured):', error.message);
+    } catch (error: unknown) {
+      console.warn('\n⚠️ streaming test skipped (this is expected if api keys are not configured):', (error as Error).message);
     }
   }, { timeout: 60000 });
 });
