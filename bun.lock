@@ -6,7 +6,7 @@
       "name": "uaiv2",
       "dependencies": {
         "@solana/web3.js": "^1.98.4",
-        "measure-fn": "^3.6.0",
+        "measure-fn": "^3.10.2",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
         "zod": "^3.25.67",
@@ -361,7 +361,7 @@
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
-    "measure-fn": ["measure-fn@3.6.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-JOMHDNX8MJX48xc4SupxLZ4XrygDdA0wVdQM9ZsxYAi7uvK4JdWEyGtIU08yPVyEzAOeVLFoys2WVerGRzWXng=="],
+    "measure-fn": ["measure-fn@3.10.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-wNDbSwDn3gDMI1sizFyr/31rt546cGcM4utSQt8ruiUKNJ/134bSN0okOqjzZw/AE5AYGB6QJTShlYXAzddmiQ=="],
 
     "media-typer": ["media-typer@1.1.0", "", {}, "sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw=="],
 
