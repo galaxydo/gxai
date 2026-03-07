@@ -1,11 +1,4 @@
 # gx402
-so the way it should work that on home page we have first of all container with auth status showing our assistant connected to telegram account or otherwise its button to connect it by adding phone number / verification password; then second container is list of contacts, those which have agents associated to them, and button to hide some of them and can see which agents are connected to this contact (can filter out not to show those without agents connected), and stats next to each. next container is agents, can see how many contacts are using that agent, how many jobs it has processed etc, and can go to page of particular agent to see its code and description, and have a button to add new agent by publishing his code, or next to each agent to add contact for this agent. and then next container, is jobs. jobs are initiated by spawning agent's code to process particular message of contact associated with that agent.
-
-each agent has its own satidb defined schema and each contact also has for its messages, so when job is running it can read those messages history of entire conversation in chat, and inside of its code it can invoke multiple gxai inference steps (to be renamed from Agent) to find out what message to send in response and then it will call our api callback to actually send that message. 
-
-where it gets really powerful that code of agent can be written such as its job (triggered by admin's contact message) it can manage our assistant's agent similarly as user would do through interface uploading agent's code and attaching to agent, but it can do it by itself even writing code of new agent and attaching it to contact, and then sending message, for example:
-
-admin contact sends a message like "schedule a meeting with my friend alex" and admin contact is associated with this powerful agent which can see which other agents exists and can see there is no such agent for scheduling meetings or knowing calendar so it will generate code for such an agent which in its code will check messages history and see what to respond in order to achieve goal through negotiation to schedule meeting at appropriate time so this father agent it creates new meetings agent and then it attaches contact of alex to it and sends message to alex, next time alex sends message to our assistant it will trigger job to be spawned from meetings agent which in turn will check calendar and check all conversation history to reply offering appropriate time slot closest to desire of correspondent.
 
 [![npm version](https://badge.fury.io/js/gx402.svg)](https://badge.fury.io/js/gx402)
 [![Bun](https://img.shields.io/badge/Bun-tested-blueviolet)](https://bun.sh/)
@@ -32,9 +25,16 @@ npm install gx402
 
 You'll also need:
 - [Zod](https://www.npmjs.com/package/zod) for schemas (`npm install zod`).
-- An LLM provider (e.g., OpenAI-compatible API). Set your API key in environment variables (e.g., `OPENAI_API_KEY`).
+- An LLM provider API key set in environment variables.
 
-For testing, use Bun's test runner: `bun add -d bun:test`.
+### Supported LLMs
+
+| Provider | Models | Env Variable |
+|----------|--------|--------------|
+| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-4`, `o4-mini-*` | `OPENAI_API_KEY` |
+| Google | `gemini-2.0-flash`, `gemini-2.5-pro` | `GEMINI_API_KEY` |
+| Anthropic | `claude-3-sonnet-*` | `ANTHROPIC_API_KEY` |
+| DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
 
 ## Quick Start
 
@@ -162,23 +162,79 @@ test('should emit streaming progress updates token-by-token', async () => {
   expect(streamingUpdates.length).toBeGreaterThan(0);
   // Verifies progressive building and final match
 }, { timeout: 60000 });
+## Gemini Multimodal
+
+gx402 includes first-class Gemini multimodal capabilities:
+
+```typescript
+import { gemini } from 'gx402';
+
+// Image generation (Imagen 4)
+const images = await gemini.generateImage({
+  prompt: 'A futuristic city at sunset',
+  aspectRatio: '16:9',
+  imageSize: '2K',
+});
+
+// Video generation (Veo 3.1)
+const video = await gemini.generateVideo({
+  prompt: 'A drone flying over mountains',
+  videoResolution: '1080p',
+  onProgress: (status) => console.log(status),
+});
+
+// Music generation (Lyria)
+const music = await gemini.generateMusic({
+  prompt: 'Upbeat electronic with synth leads',
+  bpm: 128,
+  durationSeconds: 30,
+});
+
+// Deep Research
+const research = await gemini.deepResearch({
+  query: 'Latest advances in quantum computing',
+  onProgress: (status) => console.log(status),
+});
+console.log(research.report, research.citations);
 ```
 
-Note: Tests skip if API keys aren't set (e.g., for CI).
+## x402 Payments
 
-## Configuration
-- **Environment Vars**: `OPENAI_API_KEY` (or provider-specific). Customize via `process.env`.
-- **Timeouts**: Set via test options or extend `Agent` for production.
-- **Providers**: Defaults to OpenAI-compatible; extend `LLM` class for others (e.g., Anthropic, Grok).
+MCP servers can require payment (HTTP 402). gx402 handles this automatically with Solana:
+
+```typescript
+const agent = new Agent({
+  llm: 'gpt-4o-mini',
+  inputFormat: z.object({ query: z.string() }),
+  outputFormat: z.object({ answer: z.string() }),
+  solanaWallet: {
+    privateKey: process.env.SOLANA_PRIVATE_KEY!,
+    rpcUrl: 'https://api.mainnet-beta.solana.com',
+  },
+  servers: [{ name: 'paid-api', description: 'Premium data', url: 'https://api.example.com' }],
+});
+```
+
+When a server returns 402, gx402 automatically sends SOL payment and retries.
+
+## Analytics Dashboard
+
+Built-in analytics dashboard for tracking agent performance:
+
+```typescript
+const agent = new Agent({
+  // ...config
+  analyticsUrl: 'http://localhost:3001/api/record',
+});
+```
+
+Each `agent.run()` call records timing, input/output, tool invocations, and success/failure status.
 
 ## Contributing
 1. Fork and clone.
 2. Install deps: `bun install`.
 3. Run tests: `bun test`.
-4. Lint: `bun run lint`.
-5. Submit PRs to `main`.
-
-Issues? Open a ticket on GitHub.
+4. Submit PRs to `main`.
 
 ## License
 MIT. See [LICENSE](LICENSE). 
