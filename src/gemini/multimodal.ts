@@ -223,7 +223,7 @@ export async function deepResearch(config: DeepResearchConfig): Promise<Research
                 const citations: string[] = [];
                 let match;
                 while ((match = citationRegex.exec(finalReport)) !== null) {
-                    citations.push(match[1]);
+                    citations.push(match[1]!);
                 }
 
                 return { report: finalReport, citations, interactionId: interaction.id };

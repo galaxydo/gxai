@@ -23,7 +23,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     const toolInvocations: Array<{ server: string; tool: string; parameters: any; result: any }> = [];
 
     try {
-      const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m) => {
+      const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
         const validatedInput = await m('Validate input', () =>
           this.config.inputFormat.parse(input)
         );
@@ -166,7 +166,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
       const urlMatch = desc.match(/^mcp:\s*(https?:\/\/[^\s]+)/);
       if (!urlMatch) continue;
-      const serverUrl = validateUrl(urlMatch[1]);
+      const serverUrl = urlMatch[1]!;
 
       const tempServer: MCPServer = {
         name: `resolver_${key}`,

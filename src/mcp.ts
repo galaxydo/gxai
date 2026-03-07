@@ -34,12 +34,12 @@ if (import.meta.env.NODE_ENV === "test") {
 
   test('discoverTools mock', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify([{ name: 'tool1', description: 'desc', inputSchema: {} }])) as any;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([{ name: 'tool1', description: 'desc', inputSchema: {} }])) as any) as any;
     try {
       const tools = await discoverTools({ name: 'test', description: 'test', url: 'https://test.com' });
       expect(tools).toBeArrayOfSize(1);
-      expect(tools[0].name).toBe('tool1');
+      expect(tools[0]!.name).toBe('tool1');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -47,8 +47,8 @@ if (import.meta.env.NODE_ENV === "test") {
 
   test('invokeTool mock', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ result: 'success' })) as any;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ result: 'success' })) as any) as any;
     try {
       const result = await invokeTool({ name: 'test', description: 'test', url: 'https://test.com' }, 'tool1', {});
       expect(result).toEqual({ result: 'success' });

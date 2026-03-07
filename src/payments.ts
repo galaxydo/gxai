@@ -73,7 +73,7 @@ if (import.meta.env.NODE_ENV === "test") {
 
   test('fetchWithPayment success', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response('ok', { status: 200 }) as any;
+    globalThis.fetch = (async () => new Response('ok', { status: 200 }) as any) as any;
     try {
       const res = await fetchWithPayment('https://example.com', {}, 'test fetch');
       expect(res.ok).toBe(true);
@@ -84,7 +84,7 @@ if (import.meta.env.NODE_ENV === "test") {
 
   test('fetchWithPayment throws on non-402 error', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response('Not Found', { status: 404 }) as any;
+    globalThis.fetch = (async () => new Response('Not Found', { status: 404 }) as any) as any;
     try {
       await expect(fetchWithPayment('https://example.com', {}, 'test fetch')).rejects.toThrow('404');
     } finally {

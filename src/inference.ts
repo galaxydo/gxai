@@ -235,7 +235,7 @@ if (import.meta.env.NODE_ENV === "test") {
       );
       expect(result).toContain('hello world');
       expect(streamingUpdates.length).toBeGreaterThan(0);
-      expect(streamingUpdates[0].field).toBe('response');
+      expect(streamingUpdates[0]!.field).toBe('response');
     } finally {
       globalThis.fetch = originalFetch;
     }
