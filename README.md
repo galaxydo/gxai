@@ -98,7 +98,73 @@ console.log('Status:', result.status); // e.g., "OK"
 
 Nested fields like `analysis.step1` stream as `analysis` (full JSON object building progressively) or flattened (`analysis_step1`) based on config—check your schema descriptions for hints.
 
+## LoopAgent — Self-Healing Agentic Loop
+
+`LoopAgent` iteratively calls an LLM with built-in tools (`write_file`, `read_file`, `exec`) and checks user-defined outcome predicates after each iteration. It stops when all outcomes are met or max iterations is reached.
+
+```typescript
+import { LoopAgent } from 'gx402';
+import type { LoopState } from 'gx402';
+
+const agent = new LoopAgent({
+    llm: 'gemini-2.0-flash',
+    maxIterations: 10,
+    outcomes: [
+        {
+            description: 'A working hello.ts script exists',
+            validate: async (state: LoopState) => {
+                const exists = await Bun.file('./hello.ts').exists();
+                return { met: exists, reason: exists ? 'File exists' : 'Not found' };
+            },
+        },
+    ],
+});
+
+const result = await agent.execute(
+    'Create a TypeScript script that prints "Hello!"',
+    (event) => {
+        if (event.type === 'tool_start') console.log(`🔧 ${event.tool}`);
+        if (event.type === 'complete') console.log(`✨ Done in ${event.iteration + 1} iterations`);
+    }
+);
+
+console.log(result.success); // true
+```
+
+### LoopAgent Config
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `llm` | `string` | required | LLM model identifier |
+| `outcomes` | `LoopOutcome[]` | required | Outcome predicates to check |
+| `maxIterations` | `number` | `10` | Maximum loop iterations |
+| `temperature` | `number` | `0.3` | LLM sampling temperature |
+| `maxTokens` | `number` | `8000` | Max response tokens |
+| `systemPrompt` | `string` | auto | Custom system prompt |
+| `cwd` | `string` | `process.cwd()` | Working directory for file/exec tools |
+
+### Built-in Tools
+
+The LLM can use these tools via `<tool_call>` XML blocks:
+
+- **`write_file(path, content)`** — Write content to a file (auto-creates directories)
+- **`read_file(path)`** — Read a file's content (truncated to 10KB)
+- **`exec(command)`** — Run a shell command (cross-platform: sh → cmd fallback)
+
+### Event Types
+
+| Event | Fields | When |
+|-------|--------|------|
+| `iteration_start` | `iteration` | Each loop iteration begins |
+| `tool_start` | `tool`, `params` | Before a tool executes |
+| `tool_result` | `tool`, `result` | After a tool completes |
+| `outcome_check` | `outcomes[]` | After all outcomes are validated |
+| `complete` | `iteration`, `totalElapsedMs` | All outcomes met |
+| `max_iterations_reached` | `iteration` | Loop exhausted |
+| `error` | `error` | LLM or tool error |
+
 ## API Reference
+
 
 ### Agent Constructor
 ```typescript
