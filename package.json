@@ -19,7 +19,7 @@
   },
   "peerDependencies": {
     "typescript": "^5",
-    "melina": "^1.0.0"
+    "melina": "^2.3.5"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
