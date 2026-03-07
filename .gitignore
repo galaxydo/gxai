@@ -51,3 +51,8 @@ bun.lock
 
 # misc
 .artifacts/
+
+# temp/debug output
+*_out.txt
+temp.txt
+*.tap
