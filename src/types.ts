@@ -6,6 +6,8 @@ export const LLM = {
   gpt4o: "gpt-4o",
   gpt4: "gpt-4",
   claude: "claude-3-sonnet-20240229",
+  claude35Sonnet: "claude-3-5-sonnet-20240620",
+  claude35SonnetLatest: "claude-3-5-sonnet-20241022",
   deepseek: "deepseek-chat",
   "gemini-2.0-flash": "gemini-2.0-flash",
   "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",

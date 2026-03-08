@@ -1,0 +1,226 @@
+bun test v1.3.8 (b64edcb4)
+
+main.test.ts:
+(pass) LLM Definitions > should have all expected LLM providers [15.00ms]
+(pass) Agent Class > should create an agent with input/output schemas
+(pass) Agent Class > should support custom temperature and maxTokens
+(pass) MCP Helper > should create server config
+(pass) Gemini Multimodal Exports > should export generateImage function
+(pass) Gemini Multimodal Exports > should export generateVideo function
+(pass) Gemini Multimodal Exports > should export generateMusic function
+(pass) Gemini Multimodal Exports > should export deepResearch function
+(pass) Gemini Multimodal Exports > should export gemini namespace with all functions
+
+src\index.test.ts:
+(pass) generateRequestId
+(pass) Validation Utils > validates a safe URL
+(pass) Validation Utils > rejects invalid URL scheme
+(pass) Validation Utils > rejects URL with hash
+(pass) Validation Utils > validates no arrays in schema
+(pass) Validation Utils > gets schema type name unwrapping optional
+[a] = {"input":{"user_query":"What is the weather?","location":"San Francisco"},"output_format":{"temperature":"number: current temperature in Celsius","humidity":"number: percentage","wind_speed":"string: wind speed description","forecast":"string: brief summary"},"task":"Generate a structured response based on the input, filling the output format with relevant data. Use XML tags in your response for each field.","available_tools":[{"name":"weather_api","description":"Fetches current weather data"},{"name":"forecast_tool","description":"Provides 24-hour forecast"}]}
+[b] = <input><user_query>What is the weather?</user_query><location>San Francisco</location></input><output_format><temperature>number: current temperature in Celsius</temperature><humidity>number: percentage</humidity><wind_speed>string: wind speed description</wind_speed><forecast>string: brief summary</forecast></output_format><task>Generate a structured response based on the input, filling the output format with relevant data. Use XML tags in your response for each field.</task><available_tools><item><name>weather_api</name><description>Fetches current weather data</description></item><item><name>forecast_tool</name><description>Provides 24-hour forecast</description></item></available_tools>
+[c] = JSON tokens: 110, XML tokens: 147, Token Savings: -33.6%
+[d] = JSON chars: 567, XML chars: 699, Char Savings: -23.3%
+(pass) XML Utils > realistic prompt object round-trip with descriptions and arrays, compares XML vs JSON token efficiency using tiktoken [172.00ms]
+(pass) LLM Module > should export all LLM model IDs
+(pass) LLM Module > isGeminiModel should correctly identify Gemini models
+(pass) MCP Module > mcp.server should create valid server config
+(pass) Utils Module > validateUrl should accept valid URLs
+(pass) Utils Module > validateUrl should reject invalid schemes
+(pass) Utils Module > generateRequestId should return unique IDs
+(pass) XML Utils > objToXml should convert object to XML
+(pass) XML Utils > xmlToObj should parse XML to object
+(pass) Gemini Module > should export generateImage function
+(pass) Gemini Module > should export generateVideo function
+(pass) Gemini Module > should export generateMusic function
+(pass) Gemini Module > should export deepResearch function
+(pass) Gemini Module > gemini namespace should contain all functions
+
+test\basic.test.ts:
+[e] ... LLM call gpt-4o-mini
+[e] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.28ms тЖТ "test response"
+(pass) callLLM non-streaming mock
+(pass) callLLM with streaming mock
+[f] ... test fetch
+[f] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.05ms тЖТ {}
+(pass) fetchWithPayment success
+[g] ... test fetch
+[g] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.03ms тЖТ {}
+(pass) fetchWithPayment throws on non-402 error
+[h] ... Discover tools from test
+[i] ... HTTP GET https://test.com/tools
+[i] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms тЖТ {}
+[h] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.09ms тЖТ [{"name":"tool1","description":"desc","inputSchema":{}}]
+(pass) discoverTools mock
+[j] ... Invoke test.tool1
+[k] ... HTTP POST https://test.com/call тАФ tool1
+[k] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms тЖТ {}
+[j] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.06ms тЖТ {"result":"success"}
+(pass) invokeTool mock
+(pass) Agent constructor validates no arrays in output schema
+(pass) Agent run validates input
+[l] ... Agent.run gpt-4o-mini
+[l] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.19ms (m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined))
+[l] TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:29:11)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:469:26)
+    at run (C:\Code\gxai\src\agent.ts:28:36)
+    at <anonymous> (C:\Code\gxai\test\basic.test.ts:36:94)
+
+тЪая╕П API call test skipped (this is expected if API keys are not configured): measure.assert: "Agent.run gpt-4o-mini" failed
+(pass) UAI Library Advanced Tests > should generate a structured response with a thinking process based on persona
+
+test\edge.test.ts:
+[m] ... Agent.run gpt-4o
+[m] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.05ms (m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined))
+[m] TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:29:11)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:469:26)
+    at run (C:\Code\gxai\src\agent.ts:28:36)
+    at <anonymous> (C:\Code\gxai\test\edge.test.ts:37:26)
+тЪая╕П API call test skipped (possibly due to API keys): measure.assert: "Agent.run gpt-4o" failed
+468 |   ): Promise<T> => {
+469 |     const result = await measureFn(arg1, arg2 as any);
+470 |     if (result === null) {
+471 |       const cause = _lastError;
+472 |       _lastError = null;
+473 |       throw new Error(`measure.assert: "${buildActionLabel(arg1)}" failed`, { cause });
+                      ^
+error: measure.assert: "Agent.run gpt-4o" failed
+      at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:473:17)
+      at async run (C:\Code\gxai\src\agent.ts:28:36)
+      at async <anonymous> (C:\Code\gxai\test\edge.test.ts:37:26)
+
+24 | 
+25 |     try {
+26 |       const validatedInput = this.config.inputFormat.parse(input);
+27 | 
+28 |       const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
+29 |         m.mark('Validate input', 'success');
+               ^
+TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+      at C:\Code\gxai\src\agent.ts:29:11
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:520:18
+      at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:469:26
+      at run (C:\Code\gxai\src\agent.ts:52:12)
+      at C:\Code\gxai\test\edge.test.ts:39:18
+(fail) UAI Library Tests > should process complex input validation successfully
+тЬЕ Array validation working correctly
+(pass) UAI Library Tests > should throw error for arrays in output schema
+тЬЕ Nested array validation working correctly
+(pass) UAI Library Tests > should throw error for nested arrays in output schema
+тЬЕ Input type validation working correctly
+(pass) UAI Library Tests > should validate input types correctly [15.00ms]
+тЬЕ Enum validation working correctly
+(pass) UAI Library Tests > should validate enum values correctly
+тЬЕ gpt-4o configuration valid
+тЬЕ gpt-4 configuration valid
+тЬЕ claude-3-sonnet-20240229 configuration valid
+тЬЕ deepseek-chat configuration valid
+(pass) UAI Library Tests > should support all LLM model configurations
+[n] ... Agent.run gpt-4o
+[n] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms (m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined))
+[n] TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:29:11)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:469:26)
+    at run (C:\Code\gxai\src\agent.ts:28:36)
+    at <anonymous> (C:\Code\gxai\test\edge.test.ts:182:19)
+тЪая╕П Optional fields test skipped due to API limitations
+468 |   ): Promise<T> => {
+469 |     const result = await measureFn(arg1, arg2 as any);
+470 |     if (result === null) {
+471 |       const cause = _lastError;
+472 |       _lastError = null;
+473 |       throw new Error(`measure.assert: "${buildActionLabel(arg1)}" failed`, { cause });
+                      ^
+error: measure.assert: "Agent.run gpt-4o" failed
+      at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:473:17)
+      at async run (C:\Code\gxai\src\agent.ts:28:36)
+      at async <anonymous> (C:\Code\gxai\test\edge.test.ts:182:19)
+
+24 | 
+25 |     try {
+26 |       const validatedInput = this.config.inputFormat.parse(input);
+27 | 
+28 |       const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
+29 |         m.mark('Validate input', 'success');
+               ^
+TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+      at C:\Code\gxai\src\agent.ts:29:11
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:520:18
+      at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:469:26
+      at run (C:\Code\gxai\src\agent.ts:52:12)
+      at C:\Code\gxai\test\edge.test.ts:200:19
+(fail) UAI Library Tests > should handle optional fields correctly
+[o] ... Agent.run gpt-4o
+[o] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms (m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined))
+[o] TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:29:11)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:469:26)
+    at run (C:\Code\gxai\src\agent.ts:28:36)
+    at <anonymous> (C:\Code\gxai\test\edge.test.ts:209:19)
+тЪая╕П Nullable fields test skipped due to API limitations
+468 |   ): Promise<T> => {
+469 |     const result = await measureFn(arg1, arg2 as any);
+470 |     if (result === null) {
+471 |       const cause = _lastError;
+472 |       _lastError = null;
+473 |       throw new Error(`measure.assert: "${buildActionLabel(arg1)}" failed`, { cause });
+                      ^
+error: measure.assert: "Agent.run gpt-4o" failed
+      at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:473:17)
+      at async run (C:\Code\gxai\src\agent.ts:28:36)
+      at async <anonymous> (C:\Code\gxai\test\edge.test.ts:209:19)
+
+24 | 
+25 |     try {
+26 |       const validatedInput = this.config.inputFormat.parse(input);
+27 | 
+28 |       const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
+29 |         m.mark('Validate input', 'success');
+               ^
+TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+      at C:\Code\gxai\src\agent.ts:29:11
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:520:18
+      at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+      at C:\Code\gxai\node_modules\measure-fn\index.ts:469:26
+      at run (C:\Code\gxai\src\agent.ts:52:12)
+      at C:\Code\gxai\test\edge.test.ts:230:19
+(fail) UAI Library Tests > should handle nullable fields correctly
+тЬЕ Custom configuration parameters working correctly
+(pass) UAI Library Tests > should configure agent with custom temperature and maxTokens
+
+test\streaming.test.ts:
+[p] ... Agent.run gpt-4o-mini
+[p] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.03ms (m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined))
+[p] TypeError: m.mark is not a function. (In 'm.mark("Validate input", "success")', 'm.mark' is undefined)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:29:11)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at measureFn (C:\Code\gxai\node_modules\measure-fn\index.ts:400:14)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:469:26)
+    at run (C:\Code\gxai\src\agent.ts:28:36)
+    at <anonymous> (C:\Code\gxai\test\streaming.test.ts:33:43)
+
+тЪая╕П streaming test skipped (this is expected if api keys are not configured): measure.assert: "Agent.run gpt-4o-mini" failed
+(pass) uai streaming tests > should emit streaming progress updates token-by-token
+
+3 tests failed:
+(fail) UAI Library Tests > should process complex input validation successfully
+(fail) UAI Library Tests > should handle optional fields correctly
+(fail) UAI Library Tests > should handle nullable fields correctly
+
+ 45 pass
+ 3 fail
+ 81 expect() calls
+Ran 48 tests across 5 files. [350.00ms]

@@ -19,19 +19,29 @@ export async function callLLM(
   let body: Record<string, any> = {};
 
   if (llm.includes("claude")) {
-    headers["x-api-key"] = process.env.ANTHROPIC_API_KEY!;
+    if (!process.env.ANTHROPIC_API_KEY && process.env.NODE_ENV !== "test") throw new Error("ANTHROPIC_API_KEY environment variable is required");
+    headers["x-api-key"] = process.env.ANTHROPIC_API_KEY || "test";
     headers["anthropic-version"] = "2023-06-01";
     url = "https://api.anthropic.com/v1/messages";
-    body = { model: llm, max_tokens: maxTokens, messages, stream: !!streamingCallback };
+    const systemMessage = messages.find(m => m.role === "system")?.content;
+    const anthropicMessages = messages.filter(m => m.role !== "system");
+    body = {
+      model: llm,
+      max_tokens: maxTokens,
+      messages: anthropicMessages,
+      stream: !!streamingCallback,
+      ...(systemMessage && { system: systemMessage })
+    };
   } else if (llm.includes("deepseek")) {
-    headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY}`;
+    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
+    headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
     url = "https://api.deepseek.com/v1/chat/completions";
     body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
   } else if (llm.includes("gemini")) {
     // Gemini REST API — self-contained with measure.retry for rate limits
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
-    headers["x-goog-api-key"] = apiKey;
+    if (!apiKey && process.env.NODE_ENV !== "test") throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
+    headers["x-goog-api-key"] = apiKey || "test";
     url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
 
     // Convert messages to Gemini contents/parts format
@@ -73,7 +83,8 @@ export async function callLLM(
       return text;
     });
   } else {
-    headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY}`;
+    if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
+    headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
     url = "https://api.openai.com/v1/chat/completions";
     if (llm.includes('o4-')) {
       body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };

@@ -49,14 +49,26 @@ export async function fetchWithPayment(
     const rpcUrl = solanaWallet.rpcUrl || "https://api.mainnet-beta.solana.com";
     const connection = new solanaWeb3.Connection(rpcUrl, "confirmed");
 
-    const signature = await measure.assert(
+    const signature = await measure.retry(
       `Solana tx → ${recipient}`,
-      () => connection.sendTransaction(transaction, [fromKeypair])
-    );
+      { attempts: 3, delay: 2000, backoff: 2 },
+      async () => {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = fromKeypair.publicKey;
 
-    await measure.assert(
-      `Confirm tx ${signature}`,
-      () => connection.confirmTransaction(signature)
+        const sig = await connection.sendTransaction(transaction, [fromKeypair]);
+        const confirmation = await connection.confirmTransaction({
+          signature: sig,
+          blockhash,
+          lastValidBlockHeight
+        });
+
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${confirmation.value.err}`);
+        }
+        return sig;
+      }
     );
 
     progressCallback?.({

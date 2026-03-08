@@ -23,11 +23,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     const toolInvocations: Array<{ server: string; tool: string; parameters: any; result: any }> = [];
 
     try {
-      const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
-        const validatedInput = await m('Validate input', () =>
-          this.config.inputFormat.parse(input)
-        );
+      const validatedInput = this.config.inputFormat.parse(input);
 
+      const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
         progressCallback?.({
           stage: "input_resolution",
           message: "Resolving MCP-dependent input fields...",
@@ -146,15 +144,75 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   }): Promise<void> {
     if (!this.config.analyticsUrl) return;
 
+    const flushQueue = async () => {
+      try {
+        const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import('fs');
+        const { join } = await import('path');
+        const queueDir = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.gxai');
+        const queueFile = join(queueDir, 'analytics_queue.json');
+
+        if (existsSync(queueFile)) {
+          const contents = readFileSync(queueFile, 'utf-8');
+          const queue = JSON.parse(contents);
+          if (Array.isArray(queue) && queue.length > 0) {
+            let stillFailed = [];
+            for (const item of queue) {
+              try {
+                const res = await fetch(this.config.analyticsUrl!, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(item),
+                });
+                if (!res.ok) throw new Error('Bad status');
+              } catch {
+                stillFailed.push(item);
+              }
+            }
+            if (stillFailed.length < queue.length) {
+              writeFileSync(queueFile, JSON.stringify(stillFailed));
+            }
+          }
+        }
+      } catch (err) {
+        // Suppress queue errors
+      }
+    };
+
+    // Try sending current data
     try {
-      await fetch(this.config.analyticsUrl, {
+      const res = await fetch(this.config.analyticsUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // If successful, try to flush the offline queue
+      // Don't await strictly to prevent blocking
+      flushQueue().catch(() => { });
     } catch (e) {
-      // Silently fail analytics - don't break the main flow
-      console.warn('Failed to send analytics:', e);
+      console.warn('Failed to send analytics, queueing for offline retry:', e);
+      try {
+        const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import('fs');
+        const { join } = await import('path');
+        const queueDir = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.gxai');
+        const queueFile = join(queueDir, 'analytics_queue.json');
+
+        if (!existsSync(queueDir)) {
+          mkdirSync(queueDir, { recursive: true });
+        }
+
+        let queue = [];
+        if (existsSync(queueFile)) {
+          queue = JSON.parse(readFileSync(queueFile, 'utf-8'));
+          if (!Array.isArray(queue)) queue = [];
+        }
+
+        queue.push(data);
+        writeFileSync(queueFile, JSON.stringify(queue));
+      } catch (fsErr) {
+        console.warn('Failed to save offline analytics queue:', fsErr);
+      }
     }
   }
 
