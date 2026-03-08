@@ -834,9 +834,8 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     let systemPrompt = this.config.systemPrompt || "";
     // Inject conversation history from memory
     const memory = this.config.memory as ConversationMemory | undefined;
-    if (memory && memory.turnCount > 1) {
-      systemPrompt += "\n\n" + memory.getContextString();
-    }
+    const memoryCtx = (memory && memory.turnCount > 1) ? memory.getContextString() : "";
+
     const obj: any = { input };
 
     if (!isOpenAIFamily) {
@@ -851,14 +850,30 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       obj.context = { tool_results: toolResults };
     }
     const userPrompt = objToXml(obj);
-    const messages: Array<{ role: string; content: string }> = [];
+    const messages: Array<{ role: string; content: string; cacheControl?: boolean }> = [];
+
     if (systemPrompt) {
-      messages.push({ role: "system", content: systemPrompt })
+      messages.push({
+        role: "system",
+        content: systemPrompt,
+        // Cache large static systems (Anthropic caching threshold is typically ~1024 tokens = ~4000 chars)
+        cacheControl: systemPrompt.length > 2000
+      });
     }
+
+    if (memoryCtx) {
+      messages.push({
+        role: "system",
+        content: memoryCtx,
+        // Cache memory boundaries to save massive token replay costs on long-running loops
+        cacheControl: memoryCtx.length > 2000
+      });
+    }
+
     if (isOpenAIFamily) {
       messages.push({ role: "system", content: "You must precisely follow the json output schema without deviation." });
     }
-    messages.push({ role: "user", content: `<request>${userPrompt}</request>` });
+    messages.push({ role: "user", content: `<request>\n${userPrompt}\n</request>` });
 
     const response = await measure(`LLM ${this.config.llm}`, () =>
       callLLM(

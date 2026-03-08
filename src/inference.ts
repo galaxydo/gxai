@@ -36,7 +36,7 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
 
 export async function callLLM(
   llm: LLMType | string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string; cacheControl?: boolean }>,
   options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,
@@ -56,20 +56,44 @@ export async function callLLM(
     headers["x-api-key"] = process.env.ANTHROPIC_API_KEY || "test";
     headers["anthropic-version"] = "2023-06-01";
     url = "https://api.anthropic.com/v1/messages";
-    const systemMessage = messages.find(m => m.role === "system")?.content;
-    const anthropicMessages = messages.filter(m => m.role !== "system");
+
+    const systemMessages = messages.filter(m => m.role === "system");
+    let systemParam: string | any[] | undefined = undefined;
+    if (systemMessages.length === 1 && !systemMessages[0]!.cacheControl) {
+      systemParam = systemMessages[0]!.content;
+    } else if (systemMessages.length > 0) {
+      systemParam = systemMessages.map(m => {
+        const block: any = { type: "text", text: m.content };
+        if (m.cacheControl) block.cache_control = { type: "ephemeral" };
+        return block;
+      });
+    }
+
+    const anthropicMessages = messages.filter(m => m.role !== "system").map(m => {
+      if (m.cacheControl) {
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: m.content, cache_control: { type: "ephemeral" } }
+          ]
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+
     body = {
       model: llm,
       max_tokens: maxTokens,
       messages: anthropicMessages,
       stream: !!streamingCallback,
-      ...(systemMessage && { system: systemMessage })
+      ...(systemParam !== undefined && { system: systemParam })
     };
   } else if (llm.includes("deepseek")) {
     if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
     headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
     url = "https://api.deepseek.com/v1/chat/completions";
-    body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+    const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
+    body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
   } else if (llm.includes("gemini")) {
     // Gemini REST API — self-contained with measure.retry for rate limits
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -78,7 +102,8 @@ export async function callLLM(
     url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
 
     // Convert messages to Gemini contents/parts format
-    const systemInstruction = messages.find(m => m.role === "system")?.content;
+    const systemMsgs = messages.filter(m => m.role === "system");
+    const systemInstruction = systemMsgs.length > 0 ? systemMsgs.map(m => m.content).join("\n\n") : undefined;
     const nonSystemMsgs = messages.filter(m => m.role !== "system" && m.content?.trim());
 
     // Merge consecutive same-role messages (Gemini rejects them)
@@ -120,10 +145,11 @@ export async function callLLM(
     if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
     url = "https://api.openai.com/v1/chat/completions";
+    const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
     if (llm.includes('o4-')) {
-      body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+      body = { model: llm, temperature: 1.0, messages: cleanMessages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     } else {
-      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+      body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     }
     if (response_format) {
       body.response_format = response_format;
@@ -288,7 +314,7 @@ export interface FallbackConfig {
  */
 export async function callLLMWithFallback(
   fallback: FallbackConfig,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string; cacheControl?: boolean }>,
   options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,

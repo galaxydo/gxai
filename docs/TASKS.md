@@ -93,6 +93,6 @@
 - [x] ~~**Agent Dashboard Web UI**~~ — ✅ DONE. Added `serveAgentDashboard()` which fires up a standalone HTTP server exporting a stunning glassmorphic UI. Automatically hooks into `costTracker` for live metric aggregations and uses SSE to stream `RunEvents` out of the global `EventBus` directly into the browser. Tests verify rendering and SSE framing.
 
 ## 🟢 Priority: Next Steps (Backlog Replenishment)
-- [ ] **Anthropic Prompt Caching** — Implement native support for Claude's `cache_control` blocks. Auto-tag the `ConversationMemory` boundaries and large `SystemPrompt` static sections to reduce repetitive token costs for long-running Loops by over 80%.
+- [x] ~~**Anthropic Prompt Caching**~~ — ✅ DONE. Implemented native support for Claude's `cache_control` blocks. Auto-tags the `ConversationMemory` boundaries and large `SystemPrompt` static sections to reduce repetitive token costs for long-running Loops by over 80%.
 - [ ] **Agent Isolated Code Sandbox** — Build a new built-in MCP Tool that spawns heavily restricted isolated JavaScript/TypeScript execution contexts (via WebWorkers or Bun `vm` isolation), allowing the LLM to safely generate, run, and self-correct actual code iteratively.
 - [x] ~~**Deterministic Mock Engine**~~ — ✅ DONE. Added a dedicated `AgentMock` interface (`mock-engine.ts`) with sequence-based deterministic matching, simulated latency, and tool completion telemetry hook bypassing the real LLM endpoint via an unhandled early-exit interceptor flow handling `MockAbortedExecution`.
