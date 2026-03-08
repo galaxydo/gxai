@@ -1,0 +1,31 @@
+bun test v1.3.8 (b64edcb4)
+
+test\websocket-client.test.ts:
+(pass) AgentWebSocketClient > successfully connects and echoes via JSON-RPC
+(fail) AgentWebSocketClient > handles JSON-RPC errors correctly [5016.00ms]
+  ^ this test timed out after 5000ms.
+(pass) AgentWebSocketClient > handles server-to-client notifications
+
+# Unhandled error between tests
+-------------------------------
+78 |         await new Promise<void>((resolve) => {
+79 |             client.onOpen = () => resolve();
+80 |             client.connect();
+81 |         });
+82 | 
+83 |         await expect(client.request("error")).rejects.toThrow("[-32000] Custom error");
+                                                           ^
+error: expect(received).toThrow(expected)
+
+Expected substring: "[-32000] Custom error"
+Received message: "Request timeout for method error after 30000ms"
+
+      at <anonymous> (C:\Code\gxai\test\websocket-client.test.ts:83:55)
+-------------------------------
+
+
+ 2 pass
+ 1 fail
+ 1 error
+ 4 expect() calls
+Ran 3 tests across 1 file. [30.03s]

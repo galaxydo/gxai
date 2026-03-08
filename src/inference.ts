@@ -1,6 +1,38 @@
 // src/inference.ts
 import { measure } from "measure-fn";
-import type { LLMType, ProgressCallback, StreamingCallback, StreamingUpdate } from './types';
+import type { LLMType, ProgressCallback, StreamingCallback, StreamingUpdate, TokenUsage } from './types';
+
+/** Last token usage from the most recent callLLM invocation */
+export let lastTokenUsage: TokenUsage | null = null;
+
+/** Extract token usage from provider-specific response format */
+function extractUsage(llm: string, data: any): TokenUsage | undefined {
+  // OpenAI / DeepSeek format
+  if (data?.usage?.prompt_tokens !== undefined) {
+    return {
+      inputTokens: data.usage.prompt_tokens,
+      outputTokens: data.usage.completion_tokens || 0,
+      totalTokens: data.usage.total_tokens || (data.usage.prompt_tokens + (data.usage.completion_tokens || 0)),
+    };
+  }
+  // Anthropic format
+  if (data?.usage?.input_tokens !== undefined) {
+    return {
+      inputTokens: data.usage.input_tokens,
+      outputTokens: data.usage.output_tokens || 0,
+      totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+    };
+  }
+  // Gemini format
+  if (data?.usageMetadata?.promptTokenCount !== undefined) {
+    return {
+      inputTokens: data.usageMetadata.promptTokenCount,
+      outputTokens: data.usageMetadata.candidatesTokenCount || 0,
+      totalTokens: data.usageMetadata.totalTokenCount || (data.usageMetadata.promptTokenCount + (data.usageMetadata.candidatesTokenCount || 0)),
+    };
+  }
+  return undefined;
+}
 
 export async function callLLM(
   llm: LLMType | string,
@@ -11,6 +43,7 @@ export async function callLLM(
   progressCallback?: ProgressCallback,
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
+  lastTokenUsage = null;
   const { temperature = 0.7, maxTokens = 4000, response_format } = options;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -36,7 +69,7 @@ export async function callLLM(
     if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
     headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
     url = "https://api.deepseek.com/v1/chat/completions";
-    body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+    body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
   } else if (llm.includes("gemini")) {
     // Gemini REST API — self-contained with measure.retry for rate limits
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -80,6 +113,7 @@ export async function callLLM(
       if (!text) {
         throw new Error(`Gemini API call failed: ${JSON.stringify(data).substring(0, 300)}`);
       }
+      lastTokenUsage = extractUsage(llm, data) || null;
       return text;
     });
   } else {
@@ -87,9 +121,9 @@ export async function callLLM(
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
     url = "https://api.openai.com/v1/chat/completions";
     if (llm.includes('o4-')) {
-      body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
+      body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     } else {
-      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+      body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     }
     if (response_format) {
       body.response_format = response_format;
@@ -107,6 +141,7 @@ export async function callLLM(
     const content = await measure(`LLM call ${llm}`, async () => {
       const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} API`);
       const data = await res.json() as any;
+      lastTokenUsage = extractUsage(llm, data) || null;
       const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
       if (!content) {
         throw new Error(`LLM API call to ${llm} failed. Unexpected response: ${JSON.stringify(data).substring(0, 200)}...`);
@@ -130,13 +165,36 @@ export async function callLLM(
     let wordBuffer = "";
     let insideTag = false;
 
+    // Track streaming usage across SSE events
+    const streamUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    let hasStreamUsage = false;
+
     const parseSseLine = (line: string): string => {
       if (!line.startsWith("data: ") || line.includes("[DONE]")) return "";
       try {
         const data = JSON.parse(line.slice(6));
+
+        // Extract usage from streaming chunks
         if (llm.includes("claude")) {
+          // Anthropic: message_start has input_tokens, message_delta has output_tokens
+          if (data.type === "message_start" && data.message?.usage) {
+            streamUsage.inputTokens = data.message.usage.input_tokens || 0;
+            hasStreamUsage = true;
+          }
+          if (data.type === "message_delta" && data.usage) {
+            streamUsage.outputTokens = data.usage.output_tokens || 0;
+            streamUsage.totalTokens = streamUsage.inputTokens + streamUsage.outputTokens;
+            hasStreamUsage = true;
+          }
           return data.type === "content_block_delta" && data.delta?.text ? data.delta.text : "";
         } else {
+          // OpenAI / DeepSeek: usage appears in final chunk when stream_options.include_usage is true
+          if (data.usage) {
+            streamUsage.inputTokens = data.usage.prompt_tokens || 0;
+            streamUsage.outputTokens = data.usage.completion_tokens || 0;
+            streamUsage.totalTokens = data.usage.total_tokens || (streamUsage.inputTokens + streamUsage.outputTokens);
+            hasStreamUsage = true;
+          }
           return data.choices?.[0]?.delta?.content || "";
         }
       } catch (e) {
@@ -206,8 +264,59 @@ export async function callLLM(
       }
     }
 
+    // Set token usage from streaming
+    if (hasStreamUsage) {
+      lastTokenUsage = streamUsage;
+    }
+
     return fullResponse;
   }
+}
+
+/** Configuration for provider fallback chain */
+export interface FallbackConfig {
+  /** Ordered list of LLM providers to try. First is primary, rest are fallbacks. */
+  providers: Array<LLMType | string>;
+  /** Optional callback when a fallback is triggered */
+  onFallback?: (failedProvider: string, error: string, nextProvider: string) => void;
+}
+
+/**
+ * Call LLM with automatic provider fallback.
+ * Tries each provider in the chain sequentially until one succeeds.
+ * Preserves lastTokenUsage from the successful call.
+ */
+export async function callLLMWithFallback(
+  fallback: FallbackConfig,
+  messages: Array<{ role: string; content: string }>,
+  options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
+  _measureFn?: any,
+  streamingCallback?: StreamingCallback,
+  progressCallback?: ProgressCallback,
+  customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
+): Promise<string> {
+  const { providers, onFallback } = fallback;
+  if (!providers.length) throw new Error('FallbackConfig requires at least one provider');
+
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i]!;
+    try {
+      return await callLLM(provider, messages, options, _measureFn, streamingCallback, progressCallback, customFetch);
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err.message || String(err);
+
+      if (i < providers.length - 1) {
+        const next = providers[i + 1]!;
+        console.warn(`[gxai] Provider "${provider}" failed: ${errMsg}. Falling back to "${next}"`);
+        onFallback?.(provider, errMsg, next);
+      }
+    }
+  }
+
+  throw lastError || new Error('All providers in fallback chain failed');
 }
 
 if (import.meta.env.NODE_ENV === "test") {

@@ -29,6 +29,10 @@ export interface LoopConfig {
     confidenceThreshold?: number;
     temperature?: number;
     maxTokens?: number;
+    /** Max recent tool calls to include verbatim in context (older ones are summarized). Default: 20 */
+    contextWindow?: number;
+    /** Path to auto-save state after each iteration. Enables crash recovery via `LoopAgent.fromCheckpoint()`. */
+    checkpointPath?: string;
     outcomes: LoopOutcome[];
 }
 
@@ -183,16 +187,44 @@ function buildSystemPrompt(config: LoopConfig): string {
     return parts.join('\n');
 }
 
-function buildIterationPrompt(state: LoopState, task: string): string {
+/** Compact older tool history into a brief summary to save tokens */
+function summarizeHistory(calls: ToolCall[]): string {
+    if (calls.length === 0) return '';
+    const toolCounts: Record<string, { total: number; success: number; fail: number }> = {};
+    for (const call of calls) {
+        const key = call.tool;
+        if (!toolCounts[key]) toolCounts[key] = { total: 0, success: 0, fail: 0 };
+        toolCounts[key].total++;
+        if (call.result?.success) toolCounts[key].success++;
+        else toolCounts[key].fail++;
+    }
+    const summary = Object.entries(toolCounts)
+        .map(([tool, c]) => `${tool}: ${c.total} calls (${c.success} ok, ${c.fail} failed)`)
+        .join(', ');
+    return `[Earlier history: ${calls.length} tool calls — ${summary}]`;
+}
+
+function buildIterationPrompt(state: LoopState, task: string, contextWindow: number): string {
     const parts = [task];
 
     if (state.toolHistory.length > 0) {
+        const recentStart = Math.max(0, state.toolHistory.length - contextWindow);
+        const olderCalls = state.toolHistory.slice(0, recentStart);
+        const recentCalls = state.toolHistory.slice(recentStart);
+
         parts.push('\n\n## Previous tool results:');
-        for (const call of state.toolHistory.slice(-10)) { // Last 10 calls
+
+        // Compact summary for older history
+        if (olderCalls.length > 0) {
+            parts.push(summarizeHistory(olderCalls));
+        }
+
+        // Verbatim recent calls
+        for (const call of recentCalls) {
             parts.push(`\n[${call.tool}] ${JSON.stringify(call.params)}`);
             if (call.result) {
                 parts.push(call.result.success
-                    ? `✅ ${call.result.output?.substring(0, 500) || 'OK'}`
+                    ? `✅ ${call.result.output?.substring(0, 300) || 'OK'}`
                     : `❌ ${call.result.error || 'Failed'}`);
             }
         }
@@ -243,6 +275,7 @@ export class LoopAgent {
             confidenceThreshold: 0.9,
             temperature: 0.3,
             maxTokens: 8000,
+            contextWindow: 20,
             ...config,
         };
         this.state = initialState || {
@@ -261,6 +294,77 @@ export class LoopAgent {
         return new LoopAgent(config, state);
     }
 
+    /** Resume from a checkpoint file on disk (created by checkpointPath config) */
+    public static fromCheckpoint(checkpointPath: string, config: LoopConfig): LoopAgent | null {
+        try {
+            if (!fs.existsSync(checkpointPath)) return null;
+            const json = fs.readFileSync(checkpointPath, 'utf-8');
+            return LoopAgent.fromJSON(json, config);
+        } catch {
+            return null;
+        }
+    }
+
+    /** Save current state to checkpoint file */
+    private saveCheckpoint(): void {
+        if (!this.config.checkpointPath) return;
+        try {
+            const dir = path.dirname(this.config.checkpointPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(this.config.checkpointPath, this.toJSON(), 'utf-8');
+        } catch {
+            // Checkpoint write failure is non-fatal
+        }
+    }
+
+    /** Remove checkpoint file (called on successful completion) */
+    private removeCheckpoint(): void {
+        if (!this.config.checkpointPath) return;
+        try {
+            if (fs.existsSync(this.config.checkpointPath)) fs.unlinkSync(this.config.checkpointPath);
+        } catch { }
+    }
+
+    /**
+     * Execute the loop and stream events as Server-Sent Events.
+     * Returns a ReadableStream suitable for SSE transport.
+     */
+    executeAsSSE(task: string): ReadableStream<Uint8Array> {
+        const encoder = new TextEncoder();
+        const agent = this;
+
+        return new ReadableStream({
+            async start(controller) {
+                try {
+                    await agent.execute(task, (event: LoopEvent) => {
+                        const data = `data: ${JSON.stringify(event)}\n\n`;
+                        controller.enqueue(encoder.encode(data));
+                    });
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                } catch (err: any) {
+                    const errorEvent = `data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`;
+                    controller.enqueue(encoder.encode(errorEvent));
+                } finally {
+                    controller.close();
+                }
+            }
+        });
+    }
+
+    /**
+     * Convenience: returns a complete Response object with SSE headers.
+     * Can be returned directly from an API route handler.
+     */
+    createSSEResponse(task: string): Response {
+        return new Response(this.executeAsSSE(task), {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            },
+        });
+    }
+
     async execute(task: string, onEvent?: LoopEventCallback): Promise<LoopResult> {
         const startTime = Date.now();
         const cwd = this.config.cwd || process.cwd();
@@ -275,7 +379,7 @@ export class LoopAgent {
 
             try {
                 // 1. Call LLM
-                const userPrompt = buildIterationPrompt(state, task);
+                const userPrompt = buildIterationPrompt(state, task, this.config.contextWindow!);
                 const response = await callLLM(
                     this.config.llm as string,
                     [
@@ -303,11 +407,15 @@ export class LoopAgent {
                 state.outcomeResults = await this.checkOutcomes(state);
                 onEvent?.({ type: 'outcome_check', outcomes: state.outcomeResults });
 
+                // 4b. Auto-checkpoint after each iteration
+                this.saveCheckpoint();
+
                 // 5. All met?
                 const allMet = state.outcomeResults.every(o => o.met);
                 if (allMet) {
                     const elapsed = Date.now() - startTime;
                     onEvent?.({ type: 'complete', iteration: i, totalElapsedMs: elapsed });
+                    this.removeCheckpoint();
                     return { success: true, iterations: i + 1, elapsedMs: elapsed, state };
                 }
 

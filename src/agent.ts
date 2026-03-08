@@ -1,29 +1,350 @@
 // src/agent.ts
 import { z } from "zod";
 import { measure } from "measure-fn";
-import type { AgentConfig, MCPTool, MCPServer, ProgressCallback, ProgressUpdate, StreamingCallback, StreamingUpdate } from './types';
+import type { AgentConfig, MCPTool, MCPServer, ProgressCallback, ProgressUpdate, StreamingCallback, StreamingUpdate, TokenUsage } from './types';
 import { objToXml, xmlToObj } from './xml';
-import { callLLM } from './inference';
+import { callLLM, lastTokenUsage } from './inference';
+import { cachedCallLLM } from './cache';
 import { discoverTools, invokeTool } from './mcp';
 import { fetchWithPayment } from './payments';
 import { generateRequestId } from './utils';
 import { validateUrl } from './validation';
+import { calculateCost, estimateInputCost } from './pricing';
+import type { CostEstimate } from './pricing';
+import type { ConversationMemory } from './memory';
+import { auditLog } from './audit';
+import { BudgetExceededError, ValidationError, TimeoutError } from './errors';
+import { ContextTracker } from './context';
+import type { ContextUsage } from './context';
+import { PluginRegistry } from './plugin';
+import type { AgentPlugin } from './plugin';
+
+/** Context passed to agent middleware at each phase */
+export interface MiddlewareContext {
+  phase: 'before' | 'after' | 'error';
+  agentName: string;
+  llm: string;
+  input: any;
+  output?: any;
+  error?: string;
+  usage?: TokenUsage;
+  cost?: CostEstimate;
+  durationMs?: number;
+}
+
+/** Middleware function — receives execution context at each phase */
+export type AgentMiddleware = (ctx: MiddlewareContext) => void | Promise<void>;
+
+/** Typed telemetry event emitted during agent.run() */
+export type RunEvent =
+  | { type: 'run_start'; agentName: string; llm: string; requestId: string; timestamp: number }
+  | { type: 'llm_call'; agentName: string; llm: string; purpose: string; timestamp: number }
+  | { type: 'llm_complete'; agentName: string; llm: string; purpose: string; durationMs: number; usage?: TokenUsage; timestamp: number }
+  | { type: 'tool_start'; agentName: string; server: string; tool: string; timestamp: number }
+  | { type: 'tool_complete'; agentName: string; server: string; tool: string; durationMs: number; success: boolean; timestamp: number }
+  | { type: 'run_complete'; agentName: string; llm: string; requestId: string; durationMs: number; usage?: TokenUsage; cost?: CostEstimate; timestamp: number }
+  | { type: 'run_error'; agentName: string; llm: string; requestId: string; error: string; durationMs: number; timestamp: number };
+
+/** Callback for receiving run telemetry events */
+export type RunEventCallback = (event: RunEvent) => void;
+
+/** Chunk yielded by runStream() — either a progress update or the final result */
+export type StreamChunk<T = any> =
+  | { done: false; stage: string; message: string; data?: any }
+  | { done: true; output?: T; error?: string };
 
 export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   private config: AgentConfig<I, O>;
+  private middlewares: AgentMiddleware[] = [];
+  private runEventCallback: RunEventCallback | null = null;
+  private contextTracker: ContextTracker;
+  private _plugins: Map<string, AgentPlugin> = new Map();
+  /** Token usage from the most recent run() call */
+  public lastUsage: TokenUsage | null = null;
+  /** Cost from the most recent run() call (calculated from actual token usage) */
+  public lastCost: CostEstimate | null = null;
 
   constructor(config: AgentConfig<I, O>) {
     this.config = config;
+    this.contextTracker = new ContextTracker(config.llm);
     this.validateNoArrays(this.config.outputFormat);
   }
 
+  /** Get current context window utilization across all runs */
+  get contextUsage(): ContextUsage {
+    return this.contextTracker.getUsage();
+  }
+
+  /** Reset context window tracking (call after memory pruning) */
+  resetContext(): void {
+    this.contextTracker.reset();
+  }
+
+  /**
+   * Create a copy of this agent with optional config overrides.
+   * Middleware is preserved. Useful for creating model/temperature variants.
+   */
+  clone(overrides?: Partial<AgentConfig<I, O>>): Agent<I, O> {
+    const cloned = new Agent<I, O>({ ...this.config, ...overrides });
+    cloned.middlewares = [...this.middlewares];
+    cloned.runEventCallback = this.runEventCallback;
+    return cloned;
+  }
+
+  /**
+   * Register a middleware hook. Called at 3 phases:
+   * - `before`: Pre-execution (throw to abort)
+   * - `after`: Post-success (with output, usage, cost)
+   * - `error`: On failure (with error details)
+   */
+  use(middleware: AgentMiddleware): this {
+    this.middlewares.push(middleware);
+    return this;
+  }
+
+  /** Register a telemetry event callback for observability during run() */
+  onEvent(callback: RunEventCallback): this {
+    this.runEventCallback = callback;
+    return this;
+  }
+
+  /** Register a named plugin (bundles middleware, servers, config) */
+  async register(plugin: AgentPlugin): Promise<this> {
+    if (plugin.setup) await plugin.setup();
+    if (plugin.middleware) {
+      const mws = Array.isArray(plugin.middleware) ? plugin.middleware : [plugin.middleware];
+      for (const mw of mws) this.middlewares.push(mw);
+    }
+    this._plugins.set(plugin.name, plugin);
+    return this;
+  }
+
+  /** Unregister a plugin by name */
+  async unregister(name: string): Promise<boolean> {
+    const plugin = this._plugins.get(name);
+    if (!plugin) return false;
+    if (plugin.teardown) await plugin.teardown();
+    this._plugins.delete(name);
+    return true;
+  }
+
+  /** List registered plugin names */
+  get plugins(): string[] {
+    return [...this._plugins.keys()];
+  }
+
+  /** Emit a run event if a callback is registered */
+  private emitEvent(event: RunEvent): void {
+    try { this.runEventCallback?.(event); } catch { /* non-fatal */ }
+  }
+
+  /** Route LLM calls through cache when cacheConfig is set */
+  private async callLLMCached(
+    messages: Array<{ role: string; content: string }>,
+    options: any,
+    progressCallback?: ProgressCallback,
+  ): Promise<string> {
+    if (this.config.cacheConfig) {
+      return cachedCallLLM(this.config.llm, messages, options, this.config.cacheConfig, undefined, undefined, progressCallback);
+    }
+    return callLLM(this.config.llm, messages, options, undefined, undefined, progressCallback);
+  }
+
+  /** Run all registered middleware for a given phase */
+  private async runMiddleware(ctx: MiddlewareContext): Promise<void> {
+    for (const fn of this.middlewares) {
+      await fn(ctx);
+    }
+  }
+
+  /**
+   * Estimate cost before running. Uses character-count heuristic (~4 chars/token).
+   * @param input - The input object to estimate cost for
+   * @param estimatedOutputTokens - Expected output tokens (default 1000)
+   * @returns CostEstimate with projected USD cost
+   */
+  estimateCost(input: z.infer<I>, estimatedOutputTokens = 1000): CostEstimate {
+    const validatedInput = this.config.inputFormat.parse(input);
+    const xml = objToXml({ input: validatedInput });
+    // Account for system prompt length too
+    const systemChars = (this.config.systemPrompt || '').length;
+    return estimateInputCost(this.config.llm, xml.length + systemChars, estimatedOutputTokens);
+  }
+
+  /**
+   * Run multiple inputs in parallel with concurrency control.
+   * @param inputs - Array of inputs to process
+   * @param options - `concurrency` (default 5), `progressCallback` passed to each run
+   * @returns Object with `results` (successful outputs) and `errors` (failed inputs with error messages)
+   */
+  async runBatch(
+    inputs: z.infer<I>[],
+    options: {
+      concurrency?: number;
+      progressCallback?: ProgressCallback;
+      /** Delay in ms between each batch chunk (for rate limiting) */
+      delayBetweenBatchesMs?: number;
+      /** Callback fired after each batch chunk completes */
+      onBatchProgress?: (completed: number, total: number, errors: number) => void;
+    } = {}
+  ): Promise<{ results: z.infer<O>[]; errors: Array<{ input: z.infer<I>; error: string }> }> {
+    const { concurrency = 5, progressCallback, delayBetweenBatchesMs = 0, onBatchProgress } = options;
+    const results: z.infer<O>[] = [];
+    const errors: Array<{ input: z.infer<I>; error: string }> = [];
+
+    // Process in chunks of `concurrency`
+    for (let i = 0; i < inputs.length; i += concurrency) {
+      const chunk = inputs.slice(i, i + concurrency);
+      const settled = await Promise.allSettled(
+        chunk.map(input => this.run(input, progressCallback))
+      );
+      for (let j = 0; j < settled.length; j++) {
+        const s = settled[j]!;
+        if (s.status === 'fulfilled') {
+          results.push(s.value);
+        } else {
+          errors.push({ input: chunk[j]!, error: s.reason?.message || String(s.reason) });
+        }
+      }
+
+      // Progress callback
+      onBatchProgress?.(results.length + errors.length, inputs.length, errors.length);
+
+      // Rate limiting delay between chunks
+      if (delayBetweenBatchesMs > 0 && i + concurrency < inputs.length) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenBatchesMs));
+      }
+    }
+
+    return { results, errors };
+  }
+
+  /**
+   * Run with automatic retry and exponential backoff on failure.
+   * @param input - The input to process
+   * @param options - `maxRetries` (default 3), `retryDelayMs` (default 1000), `maxDelayMs` (default 30000)
+   * @returns The output on success, throws after all retries exhausted
+   */
+  async runWithRetry(
+    input: z.infer<I>,
+    options: { maxRetries?: number; retryDelayMs?: number; maxDelayMs?: number; progressCallback?: ProgressCallback } = {}
+  ): Promise<z.infer<O>> {
+    const { maxRetries = 3, retryDelayMs = 1000, maxDelayMs = 30_000, progressCallback } = options;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.run(input, progressCallback);
+      } catch (err: any) {
+        lastError = err;
+        // Don't retry on budget exceeded, validation, or timeout errors
+        if (err instanceof BudgetExceededError || err instanceof ValidationError || err instanceof TimeoutError) {
+          throw err;
+        }
+        const msg = err?.message?.toLowerCase() || '';
+        if (msg.includes('parse')) {
+          throw err;
+        }
+        if (attempt < maxRetries) {
+          const delay = Math.min(retryDelayMs * Math.pow(2, attempt), maxDelayMs);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError || new Error('All retries exhausted');
+  }
+
   async run(input: z.infer<I>, progressCallback?: ProgressCallback): Promise<z.infer<O>> {
+    // If timeout configured, race the actual run against a timer
+    if (this.config.maxDurationMs) {
+      const maxMs = this.config.maxDurationMs;
+      return Promise.race([
+        this._runInternal(input, progressCallback),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new TimeoutError(maxMs, maxMs)), maxMs)
+        ),
+      ]);
+    }
+    return this._runInternal(input, progressCallback);
+  }
+
+  /**
+   * Stream execution as an async iterator.
+   * Yields `StreamChunk` objects with progress updates,
+   * then a final chunk with `done: true` containing the output.
+   */
+  async *runStream(input: z.infer<I>): AsyncGenerator<StreamChunk<z.infer<O>>> {
+    const chunks: StreamChunk<z.infer<O>>[] = [];
+    let resolve: (() => void) | null = null;
+    let hasMore = true;
+
+    const progressCallback: ProgressCallback = (update) => {
+      chunks.push({ done: false, stage: update.stage, message: update.message, data: update.data });
+      resolve?.();
+    };
+
+    // Run in the background
+    const runPromise = this.run(input, progressCallback).then(
+      (result) => {
+        chunks.push({ done: true, output: result });
+        hasMore = false;
+        resolve?.();
+      },
+      (error) => {
+        chunks.push({ done: true, error: error instanceof Error ? error.message : String(error) });
+        hasMore = false;
+        resolve?.();
+      }
+    );
+
+    while (hasMore || chunks.length > 0) {
+      if (chunks.length > 0) {
+        yield chunks.shift()!;
+      } else {
+        await new Promise<void>((r) => { resolve = r; });
+      }
+    }
+  }
+
+  private async _runInternal(input: z.infer<I>, progressCallback?: ProgressCallback): Promise<z.infer<O>> {
     const requestId = generateRequestId();
     const startTime = Date.now();
     const toolInvocations: Array<{ server: string; tool: string; parameters: any; result: any }> = [];
+    const usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+    /** Helper to accumulate token usage after each callLLM */
+    const accumulateUsage = () => {
+      if (lastTokenUsage) {
+        usage.inputTokens += lastTokenUsage.inputTokens;
+        usage.outputTokens += lastTokenUsage.outputTokens;
+        usage.totalTokens += lastTokenUsage.totalTokens;
+      }
+    };
+
+    // Budget guard: reject if estimated cost exceeds maxCostUSD
+    if (this.config.maxCostUSD !== undefined) {
+      const est = this.estimateCost(input, this.config.maxTokens || 4000);
+      if (est.totalCost > this.config.maxCostUSD) {
+        throw new BudgetExceededError(est.totalCost, this.config.maxCostUSD, this.config.llm);
+      }
+    }
+
+    const agentName = this.config.name || 'unnamed-agent';
 
     try {
+      // Run 'before' middleware (can throw to abort)
+      await this.runMiddleware({ phase: 'before', agentName, llm: this.config.llm, input });
+
+      this.emitEvent({ type: 'run_start', agentName, llm: this.config.llm, requestId, timestamp: Date.now() });
+
       const validatedInput = this.config.inputFormat.parse(input);
+
+      // Record input in conversation memory
+      const memory = this.config.memory as ConversationMemory | undefined;
+      if (memory) {
+        memory.addUser(objToXml({ input: validatedInput }));
+      }
 
       const result = await measure.assert(`Agent.run ${this.config.llm}`, async (m: any) => {
         progressCallback?.({
@@ -33,6 +354,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         await m('Resolve MCP inputs', () =>
           this.resolveMCPInputFields(validatedInput, progressCallback)
         );
+        accumulateUsage();
 
         let relevantServers: MCPServer[] = [];
         if (this.config.servers && this.config.servers.length > 0) {
@@ -43,6 +365,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           relevantServers = await m('Select servers', () =>
             this.selectRelevantServers(validatedInput)
           ) ?? [];
+          accumulateUsage();
           progressCallback?.({
             stage: "server_selection",
             message: `Selected ${relevantServers.length} relevant servers`,
@@ -78,16 +401,25 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
                       if (authorized !== true) {
                         const errorMsg = typeof authorized === "string" ? authorized : "Unauthorized by host application";
                         result = { error: errorMsg };
+                        auditLog.log({ decision: 'deny', tool: tool.name, server: server.name, agentName, reason: errorMsg, parameters });
                         progressCallback?.({
                           stage: "tool_invocation",
                           message: `Tool ${server.name}.${tool.name} rejected: ${errorMsg}`,
                           data: result
                         });
+                      } else {
+                        auditLog.log({ decision: 'allow', tool: tool.name, server: server.name, agentName, parameters });
                       }
+                    } else {
+                      // No authorize hook — auto-allow
+                      auditLog.log({ decision: 'allow', tool: tool.name, server: server.name, agentName, parameters });
                     }
 
                     if (!result) {
+                      this.emitEvent({ type: 'tool_start', agentName, server: server.name, tool: tool.name, timestamp: Date.now() });
+                      const toolStartMs = Date.now();
                       result = await invokeTool(server, tool.name, parameters);
+                      this.emitEvent({ type: 'tool_complete', agentName, server: server.name, tool: tool.name, durationMs: Date.now() - toolStartMs, success: !result?.error, timestamp: Date.now() });
                       progressCallback?.({
                         stage: "tool_invocation",
                         message: `Received result from ${server.name}.${tool.name}`,
@@ -109,6 +441,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
             await Promise.all(toolInvocationPromises);
           });
+          accumulateUsage();
         }
 
         progressCallback?.({
@@ -117,6 +450,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         });
 
         const response = await this.generateResponse(validatedInput, toolResults, progressCallback);
+        accumulateUsage();
 
         const validatedResponse = await m('Validate output', () =>
           this.config.outputFormat.parse(response || {})
@@ -124,6 +458,14 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
         return validatedResponse || {};
       });
+
+      this.lastUsage = usage.totalTokens > 0 ? usage : null;
+      this.lastCost = this.lastUsage ? calculateCost(this.config.llm, this.lastUsage) : null;
+
+      // Track cumulative context window usage
+      if (usage.inputTokens > 0) {
+        this.contextTracker.addUsage(usage.inputTokens);
+      }
 
       // Send analytics if configured
       if (this.config.analyticsUrl) {
@@ -137,11 +479,33 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           input,
           output: result,
           toolInvocations: toolInvocations.length > 0 ? toolInvocations : undefined,
+          tokenUsage: usage.totalTokens > 0 ? usage : undefined,
         });
       }
 
+      // Run 'after' middleware
+      await this.runMiddleware({
+        phase: 'after', agentName, llm: this.config.llm, input,
+        output: result, usage: this.lastUsage || undefined, cost: this.lastCost || undefined,
+        durationMs: Date.now() - startTime,
+      });
+
+      // Record output in conversation memory
+      if (memory) {
+        memory.addAssistant(objToXml({ output: result }));
+      }
+
+      this.emitEvent({ type: 'run_complete', agentName, llm: this.config.llm, requestId, durationMs: Date.now() - startTime, usage: this.lastUsage || undefined, cost: this.lastCost || undefined, timestamp: Date.now() });
+
       return result;
-    } catch (error) {
+    } catch (error: any) {
+      if (error && error.name === 'MockAbortedExecution') {
+        // AgentMock requested early exit with static payload
+        return error.mockedOutput;
+      }
+
+      this.lastUsage = usage.totalTokens > 0 ? usage : null;
+      this.lastCost = this.lastUsage ? calculateCost(this.config.llm, this.lastUsage) : null;
       if (this.config.analyticsUrl) {
         await this.sendAnalytics({
           id: requestId,
@@ -154,8 +518,20 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           output: {},
           error: error instanceof Error ? error.message : String(error),
           toolInvocations: toolInvocations.length > 0 ? toolInvocations : undefined,
+          tokenUsage: usage.totalTokens > 0 ? usage : undefined,
         });
       }
+
+      // Run 'error' middleware
+      await this.runMiddleware({
+        phase: 'error', agentName, llm: this.config.llm, input,
+        error: error instanceof Error ? error.message : String(error),
+        usage: this.lastUsage || undefined, cost: this.lastCost || undefined,
+        durationMs: Date.now() - startTime,
+      });
+
+      this.emitEvent({ type: 'run_error', agentName, llm: this.config.llm, requestId, error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startTime, timestamp: Date.now() });
+
       throw error;
     }
   }
@@ -171,6 +547,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     output: any;
     error?: string;
     toolInvocations?: Array<{ server: string; tool: string; parameters: any; result: any }>;
+    tokenUsage?: TokenUsage;
   }): Promise<void> {
     if (!this.config.analyticsUrl) return;
 
@@ -454,7 +831,12 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       }
     } : undefined;
 
-    const systemPrompt = this.config.systemPrompt || "";
+    let systemPrompt = this.config.systemPrompt || "";
+    // Inject conversation history from memory
+    const memory = this.config.memory as ConversationMemory | undefined;
+    if (memory && memory.turnCount > 1) {
+      systemPrompt += "\n\n" + memory.getContextString();
+    }
     const obj: any = { input };
 
     if (!isOpenAIFamily) {
@@ -491,6 +873,13 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     );
 
     if (!response) return {};
+
+    // Run output validators before parsing
+    if (this.config.outputValidators?.length) {
+      for (const validator of this.config.outputValidators) {
+        await validator(response, input);
+      }
+    }
 
     if (isOpenAIFamily && !streamingCallback) {
       try {

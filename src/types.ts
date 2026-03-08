@@ -43,7 +43,20 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   maxTokens?: number;
   solanaWallet?: { privateKey: string; rpcUrl?: string; allowedRecipients?: string[] };
   analyticsUrl?: string;
+  /** Maximum estimated cost in USD per run. If estimateCost() exceeds this, run() throws before executing. */
+  maxCostUSD?: number;
+  /** Maximum duration in milliseconds for run(). If exceeded, throws TimeoutError. */
+  maxDurationMs?: number;
+  /** Optional conversation memory for multi-turn interactions */
+  memory?: any;
+  /** Response caching config — when set, identical inputs return cached LLM responses */
+  cacheConfig?: { ttlMs?: number; maxEntries?: number };
+  /** Output validation hooks — run on raw LLM output before schema parsing. Throw to reject. */
+  outputValidators?: OutputValidator[];
 }
+
+/** Validator function that receives raw LLM output. Throw an error to reject. */
+export type OutputValidator = (rawOutput: string, input: any) => void | Promise<void>;
 
 export interface ProgressUpdate {
   stage: "server_selection" | "tool_discovery" | "tool_invocation" | "response_generation" | "streaming" | "input_resolution" | "payment";
@@ -55,6 +68,17 @@ export interface StreamingUpdate {
   stage: "streaming";
   field: string;
   value: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface LLMResult {
+  content: string;
+  usage?: TokenUsage;
 }
 
 export type ProgressCallback = (update: ProgressUpdate) => void;
