@@ -9,7 +9,7 @@
 ## 🟢 Priority: Features
 - [ ] **Integration test suite** — Current tests are unit-only. Add integration tests that hit real LLM APIs (gated behind env vars) to verify end-to-end flows.
 - [x] **CLI improvements** — Added `--health` (checks runtime, deps, API keys, analytics queue), `--version`/`-v` (prints version+runtime+platform). Updated help text with examples.
-- [ ] **npm publish automation** — Add GitHub Actions workflow for automated npm publishing on tag push.
+- [x] **npm publish automation** — GitHub Actions workflow (`.github/workflows/publish.yml`). On `v*` tag push: install deps → run tests → publish with provenance to npm. Requires `NPM_TOKEN` secret.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
