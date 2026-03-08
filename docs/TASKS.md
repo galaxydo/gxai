@@ -4,7 +4,7 @@
 - [x] **README test count outdated** — Updated: 84 → 285 tests, 559 expect() calls.
 - [x] **Export list incomplete** — Updated: added 40+ new modules to Full Export List section.
 - [x] **Duplicate module concepts** — Analyzed: they are complementary, not duplicates. `cache.ts` wraps callLLM, `response-cache.ts` is generic. `pipeline.ts` is simple chaining, `pipeline-composer.ts` adds hooks. `memory.ts` is chat history, `conversation-memory.ts` is knowledge store. Updated all doc headers with cross-references.
-- [ ] **Version bump** — Many new features added since v1.5.1. Prep a v2.0.0 release with updated changelog.
+- [x] **Version bump** — v2.0.0 released. CHANGELOG.md created with 11 new features, docs updates, and type fixes documented.
 
 ## 🟢 Priority: Features
 - [ ] **Integration test suite** — Current tests are unit-only. Add integration tests that hit real LLM APIs (gated behind env vars) to verify end-to-end flows.
