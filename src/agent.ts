@@ -356,14 +356,24 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         );
         accumulateUsage();
 
+        let activeServers: MCPServer[] = [...(this.config.servers || [])];
+        if (this.config.localTools && this.config.localTools.length > 0) {
+          activeServers.push({
+            name: '__local__',
+            description: 'Native application local runtime tools. High priority for internal functionality.',
+            url: 'local://internal',
+            __localTools: this.config.localTools
+          } as any);
+        }
+
         let relevantServers: MCPServer[] = [];
-        if (this.config.servers && this.config.servers.length > 0) {
+        if (activeServers.length > 0) {
           progressCallback?.({
             stage: "server_selection",
             message: "Analyzing input to determine relevant servers...",
           });
           relevantServers = await m('Select servers', () =>
-            this.selectRelevantServers(validatedInput)
+            this.selectRelevantServers(validatedInput, activeServers)
           ) ?? [];
           accumulateUsage();
           progressCallback?.({
@@ -705,15 +715,15 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     }
   }
 
-  private async selectRelevantServers(input: any): Promise<MCPServer[]> {
-    if (!this.config.servers || this.config.servers.length === 0) return [];
+  private async selectRelevantServers(input: any, activeServers: MCPServer[]): Promise<MCPServer[]> {
+    if (!activeServers || activeServers.length === 0) return [];
 
     return await measure('Select relevant servers', async () => {
       const systemPrompt = `You are analyzing user input to determine which servers might be relevant to fulfill the request. 
         Select only servers that are likely needed based on the input content.`;
       const userPrompt = objToXml({
         input,
-        available_servers: this.config.servers!.map(s => ({ name: s.name, description: s.description })),
+        available_servers: activeServers.map(s => ({ name: s.name, description: s.description })),
         task: "Select relevant server names that should be used to fulfill this request",
         response_format: { relevant_servers: { server_names: "array of server names" } },
       });
@@ -728,16 +738,16 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
         (url, options, _m, desc) => fetchWithPayment(url, options, desc)
       );
 
-      if (!response) return this.config.servers!;
+      if (!response) return activeServers;
 
       try {
         const parsed = xmlToObj(response);
         const serverNames = parsed.relevant_servers?.server_names || [];
-        return this.config.servers!.filter(server =>
+        return activeServers.filter(server =>
           Array.isArray(serverNames) ? serverNames.includes(server.name) : serverNames === server.name
         );
       } catch (error) {
-        return this.config.servers!;
+        return activeServers;
       }
     }) ?? [];
   }

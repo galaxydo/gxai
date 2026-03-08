@@ -30,6 +30,8 @@ export interface MCPTool {
   inputSchema: any;
   /** Optional async hook to intercept and authorize tool execution before it happens */
   authorize?: (params: any) => Promise<boolean | string>;
+  /** Direct native execution hook (bypasses MCP transport when used in localTools) */
+  execute?: (params: any) => Promise<any>;
 }
 
 export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
@@ -38,6 +40,8 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   inputFormat: I;
   outputFormat: O;
   servers?: MCPServer[];
+  /** Array of fully-implemented native JS/TS tools that bypass the remote MCP transport layer */
+  localTools?: MCPTool[];
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;

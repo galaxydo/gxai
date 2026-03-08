@@ -98,6 +98,10 @@ export type { EventHandler, EventMeta, EventBusConfig } from './event-bus';
 
 // Pipeline
 export { Pipeline, PipelineError, createPipeline, fanOut } from './pipeline';
+
+// Multi-Agent Swarm Orchestrator
+export { AgentSwarm } from './swarm';
+export type { SwarmConfig, SwarmResult } from './swarm';
 export type { PipelineStep, PipelineResult } from './pipeline';
 
 // Health Check

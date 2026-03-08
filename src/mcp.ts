@@ -3,7 +3,11 @@ import { measure } from "measure-fn";
 import type { MCPServer, MCPTool } from './types';
 import { fetchWithPayment } from './payments';
 
-export async function discoverTools(server: MCPServer): Promise<MCPTool[]> {
+export async function discoverTools(server: MCPServer & { __localTools?: MCPTool[] }): Promise<MCPTool[]> {
+  if (server.url === 'local://internal' && server.__localTools) {
+    return server.__localTools;
+  }
+
   return await measure(`Discover tools from ${server.name}`, async (m) => {
     const response = await fetchWithPayment(
       `${server.url}/tools`,
@@ -26,7 +30,15 @@ export async function discoverTools(server: MCPServer): Promise<MCPTool[]> {
   }) ?? [];
 }
 
-export async function invokeTool(server: MCPServer, toolName: string, parameters: any): Promise<any> {
+export async function invokeTool(server: MCPServer & { __localTools?: MCPTool[] }, toolName: string, parameters: any): Promise<any> {
+  if (server.url === 'local://internal' && server.__localTools) {
+    const tool = server.__localTools.find((t: MCPTool) => t.name === toolName);
+    if (!tool || !tool.execute) throw new Error(`Local tool ${toolName} not found or missing execute method`);
+    return await measure(`Invoke local ${toolName}`, async () => {
+      return await tool.execute!(parameters);
+    });
+  }
+
   const body = JSON.stringify({ method: toolName, params: parameters });
   return await measure(`Invoke ${server.name}.${toolName}`, async () => {
     const response = await fetchWithPayment(
