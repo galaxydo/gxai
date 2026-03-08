@@ -1,0 +1,162 @@
+bun test v1.3.8 (b64edcb4)
+
+test\streaming.test.ts:
+[a] = {"input":{"user_query":"What is the weather?","location":"San Francisco"},"output_format":{"temperature":"number: current temperature in Celsius","humidity":"number: percentage","wind_speed":"string: wind speed description","forecast":"string: brief summary"},"task":"Generate a structured response based on the input, filling the output format with relevant data. Use XML tags in your response for each field.","available_tools":[{"name":"weather_api","description":"Fetches current weather data"},{"name":"forecast_tool","description":"Provides 24-hour forecast"}]}
+[b] = <input><user_query>What is the weather?</user_query><location>San Francisco</location></input><output_format><temperature>number: current temperature in Celsius</temperature><humidity>number: percentage</humidity><wind_speed>string: wind speed description</wind_speed><forecast>string: brief summary</forecast></output_format><task>Generate a structured response based on the input, filling the output format with relevant data. Use XML tags in your response for each field.</task><available_tools><item><name>weather_api</name><description>Fetches current weather data</description></item><item><name>forecast_tool</name><description>Provides 24-hour forecast</description></item></available_tools>
+[c] = JSON tokens: 110, XML tokens: 147, Token Savings: -33.6%
+[d] = JSON chars: 567, XML chars: 699, Char Savings: -23.3%
+(pass) XML Utils > realistic prompt object round-trip with descriptions and arrays, compares XML vs JSON token efficiency using tiktoken [235.00ms]
+[e] ... LLM call gpt-4o-mini
+[e] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.30ms тЖТ "test response"
+(pass) callLLM non-streaming mock
+(pass) callLLM with streaming mock
+[f] ... test fetch
+[f] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.05ms тЖТ {}
+(pass) fetchWithPayment success
+[g] ... test fetch
+[g] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.04ms тЖТ {}
+(pass) fetchWithPayment throws on non-402 error
+[h] ... Discover tools from test
+[i] ... HTTP GET https://test.com/tools
+[i] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.03ms тЖТ {}
+[h] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.15ms тЖТ [{"name":"tool1","description":"desc","inputSchema":{}}]
+(pass) discoverTools mock
+[j] ... Invoke test.tool1
+[k] ... HTTP POST https://test.com/call тАФ tool1
+[k] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms тЖТ {}
+[j] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.07ms тЖТ {"result":"success"}
+(pass) invokeTool mock
+(pass) generateRequestId
+(pass) Agent constructor validates no arrays in output schema
+(pass) Agent run validates input
+[l] ... Agent.run gpt-4o-mini
+[l-a] ... Resolve MCP inputs
+[l-a] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.26ms
+[m] ... LLM gpt-4o-mini
+[n] ... HTTP gpt-4o-mini streaming
+[n] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 314.31ms тЖТ {}
+[m] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 314.57ms (Request failed: 401 - {
+    "error": {
+        "message": "Incorrect API key provided: test. You can find your API key at https://platform.openai.com/account/api-keys.",
+        "type": "invalid_request_error",
+        "param": null,
+        "code": "invalid_api_key"
+    }
+}
+)
+[m] Error: Request failed: 401 - {
+    "error": {
+        "message": "Incorrect API key provided: test. You can find your API key at https://platform.openai.com/account/api-keys.",
+        "type": "invalid_request_error",
+        "param": null,
+        "code": "invalid_api_key"
+    }
+}
+
+    at fetchWithPayment (C:\Code\gxai\src\payments.ts:25:17)
+    at async callLLM (C:\Code\gxai\src\inference.ts:118:28)
+    at async <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+[l-b] ... Validate output
+[l-b] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.19ms ([
+  {
+    "code": "invalid_type",
+    "expected": "object",
+    "received": "undefined",
+    "path": [
+      "analysis"
+    ],
+    "message": "Required"
+  },
+  {
+    "code": "invalid_type",
+    "expected": "string",
+    "received": "undefined",
+    "path": [
+      "answer"
+    ],
+    "message": "Required"
+  },
+  {
+    "code": "invalid_type",
+    "expected": "string",
+    "received": "undefined",
+    "path": [
+      "status"
+    ],
+    "message": "Required"
+  }
+])
+[l-b] ZodError
+    at error (C:\Code\gxai\node_modules\zod\dist\esm\v3\types.js:39:35)
+    at parse (C:\Code\gxai\node_modules\zod\dist\esm\v3\types.js:114:15)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:99:41)
+    at async <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+[l] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 319.95ms тЖТ {}
+
+--- final result ---
+analysis: undefined
+answer: undefined
+
+тЪая╕П streaming test skipped (this is expected if api keys are not configured): expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+(pass) uai streaming tests > should emit streaming progress updates token-by-token [328.00ms]
+[o] ... Agent.run gpt-4o-mini
+[o-a] ... Resolve MCP inputs
+[o-a] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.02ms
+[p] ... LLM gpt-4o-mini
+[q] ... HTTP gpt-4o-mini streaming
+[q] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.03ms тЖТ {}
+[p] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.50ms тЖТ "<level1><level2><level3><value1>hello</value1><value2>world</value2></level3></level2></level1><done>true</done>"
+[o-b] ... Validate output
+[o-b] тЬЧ ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 0.21ms ([
+  {
+    "code": "invalid_type",
+    "expected": "object",
+    "received": "undefined",
+    "path": [
+      "level1"
+    ],
+    "message": "Required"
+  },
+  {
+    "code": "invalid_type",
+    "expected": "boolean",
+    "received": "undefined",
+    "path": [
+      "done"
+    ],
+    "message": "Required"
+  }
+])
+[o-b] ZodError
+    at error (C:\Code\gxai\node_modules\zod\dist\esm\v3\types.js:39:35)
+    at parse (C:\Code\gxai\node_modules\zod\dist\esm\v3\types.js:114:15)
+    at <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+    at <anonymous> (C:\Code\gxai\src\agent.ts:99:41)
+    at async <anonymous> (C:\Code\gxai\node_modules\measure-fn\index.ts:325:24)
+[o] ┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖┬╖ 1.13ms тЖТ {}
+
+--- final result deep ---
+{}
+140 |       expect(fieldsUpdated.has('level1_level2_level3_value1')).toBe(true);
+141 |       expect(fieldsUpdated.has('level1_level2_level3_value2')).toBe(true);
+142 |       expect(fieldsUpdated.has('done')).toBe(true);
+143 | 
+144 |       // Verify the final result objects have been reconstructed properly by the Agent
+145 |       expect(result.level1).toBeDefined();
+                                  ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (C:\Code\gxai\test\streaming.test.ts:145:29)
+(fail) uai streaming tests > should flawlessly parse and flatten deep object nesting (3+ levels)
+
+ 11 pass
+ 1 fail
+ 20 expect() calls
+Ran 12 tests across 1 file. [698.00ms]

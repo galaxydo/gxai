@@ -62,12 +62,20 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
               if (tools && tools.length > 0) {
                 const relevantTools = await this.selectRelevantTools(validatedInput, tools, server);
                 for (const tool of (relevantTools ?? [])) {
+                  const parameters = await this.generateToolParameters(validatedInput, tool);
                   progressCallback?.({
                     stage: "tool_invocation",
-                    message: `Invoking ${server.name}.${tool.name}...`,
+                    message: `Invoking ${server.name}.${tool.name} with params...`,
+                    data: parameters
                   });
-                  const parameters = await this.generateToolParameters(validatedInput, tool);
+
                   const result = await invokeTool(server, tool.name, parameters);
+                  progressCallback?.({
+                    stage: "tool_invocation",
+                    message: `Received result from ${server.name}.${tool.name}`,
+                    data: result
+                  });
+
                   toolResults[`${server.name}.${tool.name}`] = result;
                   toolInvocations.push({
                     server: server.name,
@@ -414,12 +422,23 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       (update: StreamingUpdate) => progressCallback(update as unknown as ProgressUpdate) :
       undefined;
 
+    const isOpenAIFamily = this.config.llm.startsWith('gpt') || this.config.llm.startsWith('o4-');
+    const responseFormat = isOpenAIFamily ? {
+      type: "json_schema",
+      json_schema: {
+        name: "gxai_output",
+        strict: true,
+        schema: Object.assign((await import("zod-to-json-schema")).zodToJsonSchema(this.config.outputFormat), { additionalProperties: false })
+      }
+    } : undefined;
+
     const systemPrompt = this.config.systemPrompt || "";
-    const obj: any = {
-      input,
-      output_format: this.getOutputFormatDescription(),
-      task: this.generateTaskDescription(),
-    };
+    const obj: any = { input };
+
+    if (!isOpenAIFamily) {
+      obj.output_format = this.getOutputFormatDescription();
+      obj.task = this.generateTaskDescription();
+    }
 
     const hasToolResults = toolResults && Object.keys(toolResults).length > 0 &&
       Object.values(toolResults).some(result =>
@@ -432,13 +451,16 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt })
     }
+    if (isOpenAIFamily) {
+      messages.push({ role: "system", content: "You must precisely follow the json output schema without deviation." });
+    }
     messages.push({ role: "user", content: `<request>${userPrompt}</request>` });
 
     const response = await measure(`LLM ${this.config.llm}`, () =>
       callLLM(
         this.config.llm,
         messages,
-        { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000 },
+        { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000, response_format: responseFormat },
         null,
         streamingCallback,
         progressCallback,
@@ -447,6 +469,14 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     );
 
     if (!response) return {};
+
+    if (isOpenAIFamily && !streamingCallback) {
+      try {
+        return JSON.parse(response);
+      } catch (e) {
+        return {};
+      }
+    }
 
     const parsed = xmlToObj(response);
     if (!parsed) return {};

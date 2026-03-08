@@ -15,7 +15,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
-    "tiktoken": "^1.0.22"
+    "tiktoken": "^1.0.22",
+    "zod-to-json-schema": "^3.25.1"
   },
   "peerDependencies": {
     "typescript": "^5"

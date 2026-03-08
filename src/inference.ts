@@ -5,13 +5,13 @@ import type { LLMType, ProgressCallback, StreamingCallback, StreamingUpdate } fr
 export async function callLLM(
   llm: LLMType | string,
   messages: Array<{ role: string; content: string }>,
-  options: { temperature?: number; maxTokens?: number } = {},
+  options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,
   progressCallback?: ProgressCallback,
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
-  const { temperature = 0.7, maxTokens = 4000 } = options;
+  const { temperature = 0.7, maxTokens = 4000, response_format } = options;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -90,6 +90,9 @@ export async function callLLM(
       body = { model: llm, temperature: 1.0, messages, max_completion_tokens: maxTokens, stream: !!streamingCallback };
     } else {
       body = { model: llm, temperature, messages, max_tokens: maxTokens, stream: !!streamingCallback };
+    }
+    if (response_format) {
+      body.response_format = response_format;
     }
   }
 
