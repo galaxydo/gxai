@@ -1,8 +1,10 @@
 /**
- * response-cache.ts — Deterministic LRU Response Cache
+ * response-cache.ts — Generic LRU Response Cache
  *
- * Caches agent responses by input hash with TTL expiry.
- * Reduces redundant LLM calls for identical inputs.
+ * A reusable, typed LRU cache with TTL, stats tracking, and getOrSet().
+ * Use this for caching any value (API responses, embeddings, computed results).
+ *
+ * NOTE: For LLM-specific caching (wraps callLLM transparently), see cache.ts.
  *
  * Usage:
  *   const cache = new ResponseCache({ maxSize: 100, ttlMs: 60_000 });

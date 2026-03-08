@@ -1,14 +1,16 @@
 /**
- * pipeline.ts — Agent Pipeline Composition
+ * pipeline.ts — Simple Agent Pipeline (Sequential Chaining)
  *
  * Chain agents sequentially: output of one feeds input of the next.
  * Supports branching, parallel fan-out, and error handling.
  *
+ * NOTE: For advanced pipelines with before/after hooks and per-step error
+ * strategies (skip/abort/fallback), see pipeline-composer.ts (PipelineComposer).
+ *
  * Usage:
  *   const pipeline = createPipeline('summarize-then-classify')
  *     .pipe(summaryAgent)
- *     .pipe(classifyAgent)
- *     .build();
+ *     .pipe(classifyAgent);
  *   const result = await pipeline.run(input);
  */
 

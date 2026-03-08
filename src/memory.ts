@@ -1,8 +1,12 @@
 /**
- * memory.ts — Agent Conversation Memory
+ * memory.ts — Turn-based Conversation History
  *
- * Maintains conversational history across multiple Agent.run() calls,
- * enabling multi-turn interactions where the agent remembers prior context.
+ * Maintains chat-style message history (user/assistant/system turns)
+ * across multiple Agent.run() calls. Supports pruning, summarization,
+ * and LLM-powered compression for long-running conversations.
+ *
+ * NOTE: For persistent knowledge storage with semantic search and tagging,
+ * see conversation-memory.ts (ConversationMemory — knowledge store).
  *
  * Usage:
  *   const memory = new ConversationMemory({ maxTurns: 10 });

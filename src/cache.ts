@@ -1,8 +1,10 @@
 /**
- * cache.ts — LLM Response Cache
+ * cache.ts — LLM Response Cache (wraps callLLM)
  *
- * In-memory LRU cache for LLM responses, keyed by a hash of
- * (model + messages + options). Saves cost on repeated identical inputs.
+ * Drop-in replacement for callLLM that transparently caches responses.
+ * Keyed by hash of (model + messages + options). Saves cost on repeated identical inputs.
+ *
+ * NOTE: For a generic, reusable cache class, see response-cache.ts (ResponseCache<T>).
  *
  * Usage:
  *   import { cachedCallLLM } from './cache';

@@ -1,7 +1,11 @@
 /**
- * conversation-memory.ts — Long-term Conversation Memory
+ * conversation-memory.ts — Knowledge Store with Semantic Search
  *
- * Persistent memory with semantic similarity retrieval.
+ * Persistent tagged memory with text similarity retrieval and importance ranking.
+ * Use this to store long-term knowledge entries that persist across sessions.
+ *
+ * NOTE: For turn-based chat history (user/assistant message pairs),
+ * see memory.ts (ConversationMemory — chat history).
  *
  * Usage:
  *   const mem = new ConversationMemory({ maxEntries: 1000 });

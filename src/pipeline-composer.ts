@@ -1,12 +1,15 @@
 /**
- * pipeline-composer.ts — Pipeline Builder for Chaining Agent Steps
+ * pipeline-composer.ts — Advanced Pipeline Builder with Hooks & Error Strategies
  *
- * Build typed, composable pipelines with error handling and metadata.
+ * Build typed, composable pipelines with before/after hooks,
+ * per-step error handling (skip/abort/fallback), and metadata context.
+ *
+ * NOTE: For simpler sequential chaining without hooks, see pipeline.ts (Pipeline).
  *
  * Usage:
  *   const pipeline = compose('my-pipeline')
  *     .pipe('validate', validateFn)
- *     .pipe('process', processFn)
+ *     .pipe('process', processFn, { onError: 'skip' })
  *     .pipe('format', formatFn);
  *   const result = await pipeline.execute(input);
  */
