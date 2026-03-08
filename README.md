@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/gx402.svg)](https://badge.fury.io/js/gx402)
 [![Bun](https://img.shields.io/badge/Bun-tested-blueviolet)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-84%20pass-brightgreen)](https://bun.sh/)
+[![Tests](https://img.shields.io/badge/tests-285%20pass-brightgreen)](https://bun.sh/)
 
 **Agentic AI framework for TypeScript.** Structured I/O via Zod, real-time streaming, multi-provider LLM support, tool orchestration via MCP, automatic Solana x402 payments, and production-grade safeguards — all in a single package.
 
@@ -431,7 +431,7 @@ View queued analytics: `bun run analytics` or `gx --analytics`
 ## Testing
 
 ```bash
-bun test   # 84 tests, 0 failures, 180 assertions
+bun test   # 285 tests, 0 failures, 559 expect() calls
 ```
 
 ## Full Export List
@@ -440,26 +440,31 @@ bun test   # 84 tests, 0 failures, 180 assertions
 // Agents
 Agent, LoopAgent
 
+// Testing & Mocking
+AgentMock
+
 // Errors
-GxaiError, BudgetExceededError, ValidationError, ProviderError, AuthorizationError, MaxIterationsError
+GxaiError, BudgetExceededError, ValidationError, ProviderError,
+AuthorizationError, MaxIterationsError, TimeoutError
 
 // Inference
 callLLM, callLLMWithFallback, lastTokenUsage
 
 // Cache
 cachedCallLLM, clearCache, getCacheSize, getCacheStats
+ResponseCache
 
 // Pricing
 getModelPricing, calculateCost, estimateInputCost
 
 // Memory
-ConversationMemory
+ConversationMemory, LongTermMemory
 
 // Audit
 AuditLog, auditLog
 
 // MCP
-discoverTools, invokeTool, mcp
+discoverTools, invokeTool
 
 // Payments
 fetchWithPayment
@@ -467,8 +472,86 @@ fetchWithPayment
 // Multimodal
 gemini, generateImage, generateVideo, generateMusic, deepResearch
 
+// Tool Orchestration
+ToolAuthorizer, allowAllTools, onlyTools, blockTools
+ToolRegistry
+
+// Pipeline & Composition
+Pipeline, createPipeline, fanOut
+PipelineComposer, compose
+
+// Multi-Agent
+AgentSwarm
+
+// State Machine
+StateMachine
+
+// Prompt Templates
+createTemplate, composeTemplates, TEMPLATES
+createPromptTemplate, renderTemplate, composePromptTemplates, systemPrompt, userPrompt
+
+// Middleware & Preprocessors
+MiddlewareChain
+chainPreprocessors, trimStrings, validateLength, addTimestamp, stripFields,
+withDefaults, renameFields, customPreprocessor
+
+// Guardrails
+Guardrails, maxLengthRule, noPIIRule, blockKeywords, nonEmptyRule
+
+// Context & Sessions
+ContextTracker, getContextWindowSize
+ContextWindow
+SessionManager
+
+// Retry & Rate Limiting
+linearRetry, exponentialBackoff, fullJitter, noRetry, withRetry
+RateLimiter
+
+// Event Bus
+EventBus, globalBus
+
+// Observability
+CostTracker, costTracker
+MetricsCollector
+StructuredLogger, consoleTransport, jsonTransport, bufferTransport
+createOtelCallback
+healthCheck, formatHealthReport
+
+// Batch Processing
+batchProcess, chunk, sequentialProcess
+
+// Configuration
+ConfigProfileManager, createProfileManager
+
+// Dependency Injection
+DIContainer
+
+// Schema
+SchemaEvolutionBuilder, createSchemaEvolution
+schemaString, schemaNumber, schemaBoolean, schemaArray, schemaObject
+
+// Output
+formatOutput, templateFormatter
+
+// Networking
+WebhookHandler, hmacSha256, simpleHash
+AgentWebSocketClient
+
+// Sandbox
+createSandboxTools, serveSandboxMCP
+
+// File System Tools
+createFileSystemTools, resolveAndValidatePath, serveFileSystemMCP
+
+// Dashboard
+serveAgentDashboard
+
+// Plugin System
+PluginRegistry
+
 // Utilities
-objToXml, xmlToObj, validateUrl, generateRequestId
+objToXml, xmlToObj, validateUrl, validateNoArrays, getSchemaTypeName,
+generateRequestId
 ```
 
 ## License
