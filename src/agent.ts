@@ -57,51 +57,57 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
             message: "Discovering available tools...",
           });
           await m('Discover and invoke tools', async () => {
-            for (const server of relevantServers) {
+            const toolInvocationPromises: Promise<void>[] = [];
+
+            await Promise.all(relevantServers.map(async (server) => {
               const tools = await discoverTools(server);
               if (tools && tools.length > 0) {
                 const relevantTools = await this.selectRelevantTools(validatedInput, tools, server);
                 for (const tool of (relevantTools ?? [])) {
-                  const parameters = await this.generateToolParameters(validatedInput, tool);
-                  progressCallback?.({
-                    stage: "tool_invocation",
-                    message: `Invoking ${server.name}.${tool.name} with params...`,
-                    data: parameters
-                  });
+                  toolInvocationPromises.push((async () => {
+                    const parameters = await this.generateToolParameters(validatedInput, tool);
+                    progressCallback?.({
+                      stage: "tool_invocation",
+                      message: `Invoking ${server.name}.${tool.name} with params...`,
+                      data: parameters
+                    });
 
-                  let result: any;
-                  if (tool.authorize) {
-                    const authorized = await tool.authorize(parameters);
-                    if (authorized !== true) {
-                      const errorMsg = typeof authorized === "string" ? authorized : "Unauthorized by host application";
-                      result = { error: errorMsg };
+                    let result: any;
+                    if (tool.authorize) {
+                      const authorized = await tool.authorize(parameters);
+                      if (authorized !== true) {
+                        const errorMsg = typeof authorized === "string" ? authorized : "Unauthorized by host application";
+                        result = { error: errorMsg };
+                        progressCallback?.({
+                          stage: "tool_invocation",
+                          message: `Tool ${server.name}.${tool.name} rejected: ${errorMsg}`,
+                          data: result
+                        });
+                      }
+                    }
+
+                    if (!result) {
+                      result = await invokeTool(server, tool.name, parameters);
                       progressCallback?.({
                         stage: "tool_invocation",
-                        message: `Tool ${server.name}.${tool.name} rejected: ${errorMsg}`,
+                        message: `Received result from ${server.name}.${tool.name}`,
                         data: result
                       });
                     }
-                  }
 
-                  if (!result) {
-                    result = await invokeTool(server, tool.name, parameters);
-                    progressCallback?.({
-                      stage: "tool_invocation",
-                      message: `Received result from ${server.name}.${tool.name}`,
-                      data: result
+                    toolResults[`${server.name}.${tool.name}`] = result;
+                    toolInvocations.push({
+                      server: server.name,
+                      tool: tool.name,
+                      parameters,
+                      result
                     });
-                  }
-
-                  toolResults[`${server.name}.${tool.name}`] = result;
-                  toolInvocations.push({
-                    server: server.name,
-                    tool: tool.name,
-                    parameters,
-                    result
-                  });
+                  })());
                 }
               }
-            }
+            }));
+
+            await Promise.all(toolInvocationPromises);
           });
         }
 

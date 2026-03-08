@@ -291,13 +291,13 @@ export class LoopAgent {
                 // 2. Parse tool calls from response
                 const toolCalls = parseToolCalls(response);
 
-                // 3. Execute each tool call
-                for (const call of toolCalls) {
+                // 3. Execute each tool call in parallel
+                await Promise.all(toolCalls.map(async (call) => {
                     onEvent?.({ type: 'tool_start', tool: call.tool, params: call.params });
                     call.result = await executeTool(call.tool, call.params, cwd);
-                    state.toolHistory.push(call);
                     onEvent?.({ type: 'tool_result', tool: call.tool, result: call.result });
-                }
+                }));
+                state.toolHistory.push(...toolCalls);
 
                 // 4. Check outcomes
                 state.outcomeResults = await this.checkOutcomes(state);
