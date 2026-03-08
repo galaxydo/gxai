@@ -9,7 +9,7 @@ export async function fetchWithPayment(
   options: RequestInit,
   description: string,
   progressCallback?: ProgressCallback,
-  solanaWallet?: { privateKey: string; rpcUrl?: string }
+  solanaWallet?: { privateKey: string; rpcUrl?: string; allowedRecipients?: string[] }
 ): Promise<Response> {
   let retries = 0;
   const maxRetries = 1;
@@ -27,6 +27,12 @@ export async function fetchWithPayment(
 
     const paymentInfo = await res.json() as { amount: number; recipient: string };
     const { amount, recipient } = paymentInfo;
+
+    if (solanaWallet.allowedRecipients && solanaWallet.allowedRecipients.length > 0) {
+      if (!solanaWallet.allowedRecipients.includes(recipient)) {
+        throw new Error(`Security Error: Payment requested by an unregistered recipient address (${recipient}).`);
+      }
+    }
 
     progressCallback?.({
       stage: "payment",
@@ -99,6 +105,21 @@ if (import.meta.env.NODE_ENV === "test") {
     globalThis.fetch = (async () => new Response('Not Found', { status: 404 }) as any) as any;
     try {
       await expect(fetchWithPayment('https://example.com', {}, 'test fetch')).rejects.toThrow('404');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetchWithPayment rejects unregistered 402 recipient spoofing', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ amount: 0.1, recipient: "EVIL_ADDRESS" }), { status: 402 }) as any) as any;
+    try {
+      await expect(
+        fetchWithPayment('https://example.com', {}, 'test fetch', undefined, {
+          privateKey: "dummy",
+          allowedRecipients: ["GOOD_ADDRESS"]
+        })
+      ).rejects.toThrow(/Security Error: Payment requested by an unregistered recipient address/);
     } finally {
       globalThis.fetch = originalFetch;
     }

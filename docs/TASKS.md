@@ -12,7 +12,7 @@
 - [x] ~~**Streaming nested object support**~~ — ✅ DONE. Verified engine perfectly handles arbitrary deep object nesting (> 3 levels) thanks to `tagStack.join("_")` inside the realtime XML progressive chunk parser, and added an explicit recursive boundary mock test in `test/streaming.test.ts` to guarantee it never regresses.
 
 ## 🟢 Priority: Features
-- [ ] **x402 Server Identity Validation** — Before automatically signing a SOL transfer for HTTP 402 responses, cross-match the requested destination address with a hardened registry or MCP signature to prevent spoofing.
+- [x] ~~**x402 Server Identity Validation**~~ — ✅ DONE. Added `allowedRecipients?: string[]` to the Agent's `solanaWallet` configuration parameter, letting developers explicitly dictate a hardened registry. The `fetchWithPayment` flow now cross-matches the `recipient` from the HTTP 402 body against this list (if provided), halting execution unconditionally and throwing a Security Error to prevent accidental spoofing.
 - [x] ~~**Claude 3.5 Sonnet Support**~~ — ✅ DONE. Explicitly added `claude35Sonnet` and `claude35SonnetLatest` into the global `LLM` exported types. Furthermore, refactored Anthropic inference adapter in `src/inference.ts` to properly segregate the `.find(m => m.role === "system")` prompt out of the `messages` array into the root `system` string parameter as demanded by the Anthropic message API spec.
 - [x] ~~**Solana Transaction Retries for 402**~~ — ✅ DONE. Upgraded the static `connection.sendTransaction` logic in `src/payments.ts` to use `measure.retry` wrapping blockhash extraction, submission, and confirmation into one self-repairing chunk that automatically triggers `exponential backoff` (3 attempts, 2-second base delay, 2x scaling per iteration).
 

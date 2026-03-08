@@ -37,7 +37,7 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  solanaWallet?: { privateKey: string; rpcUrl?: string };
+  solanaWallet?: { privateKey: string; rpcUrl?: string; allowedRecipients?: string[] };
   analyticsUrl?: string;
 }
 
