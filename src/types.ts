@@ -20,12 +20,16 @@ export interface MCPServer {
   name: string;
   description: string;
   url: string;
+  /** Optional overrides for discovered tools (e.g., injecting auth hooks) */
+  tools?: Record<string, Partial<MCPTool>>;
 }
 
 export interface MCPTool {
   name: string;
   description: string;
   inputSchema: any;
+  /** Optional async hook to intercept and authorize tool execution before it happens */
+  authorize?: (params: any) => Promise<boolean | string>;
 }
 
 export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {

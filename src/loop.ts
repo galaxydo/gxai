@@ -232,8 +232,9 @@ function parseToolCalls(response: string): ToolCall[] {
 
 export class LoopAgent {
     private config: LoopConfig;
+    public state: LoopState;
 
-    constructor(config: LoopConfig) {
+    constructor(config: LoopConfig, initialState?: LoopState) {
         if (!config.outcomes?.length) {
             throw new Error('LoopAgent requires at least one outcome');
         }
@@ -244,21 +245,31 @@ export class LoopAgent {
             maxTokens: 8000,
             ...config,
         };
+        this.state = initialState || {
+            iteration: 0,
+            toolHistory: [],
+            outcomeResults: [],
+        };
+    }
+
+    public toJSON(): string {
+        return JSON.stringify(this.state);
+    }
+
+    public static fromJSON(json: string, config: LoopConfig): LoopAgent {
+        const state = JSON.parse(json) as LoopState;
+        return new LoopAgent(config, state);
     }
 
     async execute(task: string, onEvent?: LoopEventCallback): Promise<LoopResult> {
         const startTime = Date.now();
         const cwd = this.config.cwd || process.cwd();
-        const state: LoopState = {
-            iteration: 0,
-            toolHistory: [],
-            outcomeResults: [],
-        };
+        const state = this.state;
 
         const systemPrompt = buildSystemPrompt(this.config);
         const maxIter = this.config.maxIterations!;
 
-        for (let i = 0; i < maxIter; i++) {
+        for (let i = state.iteration; i < maxIter; i++) {
             state.iteration = i;
             onEvent?.({ type: 'iteration_start', iteration: i });
 

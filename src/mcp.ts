@@ -11,6 +11,17 @@ export async function discoverTools(server: MCPServer): Promise<MCPTool[]> {
       `HTTP GET ${server.url}/tools`
     );
     const tools = await response.json() as MCPTool[];
+
+    // Inject overlays (like auth hooks) if defined on the server config
+    if (server.tools) {
+      for (const t of tools) {
+        const overlay = server.tools[t.name];
+        if (overlay && overlay.authorize) {
+          t.authorize = overlay.authorize;
+        }
+      }
+    }
+
     return tools;
   }) ?? [];
 }
