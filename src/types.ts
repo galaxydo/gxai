@@ -1,5 +1,6 @@
 // src/types.ts
 import { z } from "zod";
+import type { ToolAuthorizer } from "./tool-auth";
 
 export const LLM = {
   "gpt-4o-mini": "gpt-4o-mini",
@@ -57,6 +58,8 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   cacheConfig?: { ttlMs?: number; maxEntries?: number };
   /** Output validation hooks — run on raw LLM output before schema parsing. Throw to reject. */
   outputValidators?: OutputValidator[];
+  /** Tool authorization mechanism to globally whitelist/blacklist tools */
+  toolAuth?: ToolAuthorizer;
 }
 
 /** Validator function that receives raw LLM output. Throw an error to reject. */

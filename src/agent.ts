@@ -406,7 +406,19 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
                     });
 
                     let result: any;
-                    if (tool.authorize) {
+
+                    // 1. Check global ToolAuth definitions
+                    if (this.config.toolAuth) {
+                      const decision = this.config.toolAuth.isAllowed(tool.name, server.name);
+                      if (!decision.allowed) {
+                        result = { error: `Tool execution denied: ${decision.reason}` };
+                        auditLog.log({ decision: 'deny', tool: tool.name, server: server.name, agentName, reason: decision.reason, parameters });
+                        progressCallback?.({ stage: "tool_invocation", message: `Tool ${server.name}.${tool.name} globally rejected: ${decision.reason}`, data: result });
+                      }
+                    }
+
+                    // 2. Check local component authorize hook if global auth allowed it
+                    if (!result && tool.authorize) {
                       const authorized = await tool.authorize(parameters);
                       if (authorized !== true) {
                         const errorMsg = typeof authorized === "string" ? authorized : "Unauthorized by host application";
@@ -420,7 +432,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
                       } else {
                         auditLog.log({ decision: 'allow', tool: tool.name, server: server.name, agentName, parameters });
                       }
-                    } else {
+                    } else if (!result) {
                       // No authorize hook — auto-allow
                       auditLog.log({ decision: 'allow', tool: tool.name, server: server.name, agentName, parameters });
                     }

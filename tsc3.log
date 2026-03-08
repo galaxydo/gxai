@@ -1,0 +1,24 @@
+examples/multi-agent-chat/app/components/MultiAgentChat.tsx(4,24): error TS2307: Cannot find module 'melina/island' or its corresponding type declarations.
+examples/multi-agent-chat/server.ts(6,40): error TS2307: Cannot find module 'melina' or its corresponding type declarations.
+node_modules/@ments/utils/index.ts(90,11): error TS2502: 'measure' is referenced directly or indirectly in its own type annotation.
+node_modules/@ments/utils/index.ts(101,31): error TS2345: Argument of type 'string | number' is not assignable to parameter of type 'number'.
+  Type 'string' is not assignable to type 'number'.
+node_modules/@ments/utils/index.ts(107,60): error TS2345: Argument of type '(string | number)[]' is not assignable to parameter of type 'string[]'.
+  Type 'string | number' is not assignable to type 'string'.
+    Type 'number' is not assignable to type 'string'.
+node_modules/@ments/utils/index.ts(110,39): error TS2345: Argument of type '(...args: any[]) => unknown' is not assignable to parameter of type '(fn: any, action: any) => Promise<U | null>'.
+  Type 'unknown' is not assignable to type 'Promise<U | null>'.
+node_modules/@ments/utils/index.ts(131,14): error TS7022: 'measureSync' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+node_modules/@ments/utils/index.ts(143,31): error TS2345: Argument of type 'string | number' is not assignable to parameter of type 'number'.
+  Type 'string' is not assignable to type 'number'.
+node_modules/@ments/utils/index.ts(149,61): error TS2345: Argument of type '(string | number)[]' is not assignable to parameter of type 'string[]'.
+  Type 'string | number' is not assignable to type 'string'.
+    Type 'number' is not assignable to type 'string'.
+node_modules/@ments/utils/index.ts(152,33): error TS2345: Argument of type '(...args: any[]) => unknown' is not assignable to parameter of type '(fn: any, action: any) => U | null'.
+  Type 'unknown' is not assignable to type 'U | null'.
+src/core.test.ts(1410,45): error TS2345: Argument of type '{ port: number; }' is not assignable to parameter of type 'undefined'.
+src/core.test.ts(1418,44): error TS2345: Argument of type '42' is not assignable to parameter of type 'undefined'.
+src/core.test.ts(1419,45): error TS2345: Argument of type '99' is not assignable to parameter of type 'undefined'.
+src/core.test.ts(1510,36): error TS2345: Argument of type '"Alice"' is not assignable to parameter of type 'undefined'.
+src/core.test.ts(1527,36): error TS2345: Argument of type '"value"' is not assignable to parameter of type 'undefined'.
+src/core.test.ts(1768,40): error TS2345: Argument of type 'null' is not assignable to parameter of type 'never'.
