@@ -11,6 +11,10 @@ export * from './types';
 export { Agent } from './agent';
 export type { MiddlewareContext, AgentMiddleware, RunEvent, RunEventCallback, StreamChunk } from './agent';
 
+// Sandbox Code Execution
+export { createSandboxTools, serveSandboxMCP } from './sandbox';
+export type { SandboxConfig } from './sandbox';
+
 // Mocking & Testing
 export { AgentMock } from './mock-engine';
 export type { AgentMockConfig, MockSequenceItem } from './mock-engine';

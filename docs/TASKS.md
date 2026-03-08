@@ -94,5 +94,5 @@
 
 ## 🟢 Priority: Next Steps (Backlog Replenishment)
 - [x] ~~**Anthropic Prompt Caching**~~ — ✅ DONE. Implemented native support for Claude's `cache_control` blocks. Auto-tags the `ConversationMemory` boundaries and large `SystemPrompt` static sections to reduce repetitive token costs for long-running Loops by over 80%.
-- [ ] **Agent Isolated Code Sandbox** — Build a new built-in MCP Tool that spawns heavily restricted isolated JavaScript/TypeScript execution contexts (via WebWorkers or Bun `vm` isolation), allowing the LLM to safely generate, run, and self-correct actual code iteratively.
+- [x] ~~**Agent Isolated Code Sandbox**~~ — ✅ DONE. Built a new built-in MCP Tool (`sandbox.ts`) that spawns heavily restricted isolated JavaScript/TypeScript execution contexts via Node `vm` context with strict timeouts and console mocking/capture. Completely detaches access to host environment arrays (`Bun`, `process`, etc.) to let the LLM safely run arbitrary logic, computations, and data transformations locally.
 - [x] ~~**Deterministic Mock Engine**~~ — ✅ DONE. Added a dedicated `AgentMock` interface (`mock-engine.ts`) with sequence-based deterministic matching, simulated latency, and tool completion telemetry hook bypassing the real LLM endpoint via an unhandled early-exit interceptor flow handling `MockAbortedExecution`.
