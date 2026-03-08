@@ -7,7 +7,7 @@
 
 ## 🟡 Priority: Improve
 - [x] ~~**OpenAI native Structured Outputs**~~ — ✅ DONE. `response_format: { type: "json_schema" }` is directly synthesized from output schemas via `zod-to-json-schema` and sent on the `gpt` and `o4-` family configurations implicitly guaranteeing correct output without the verbose custom XML prompting instruction payload overhead.
-- [ ] **Local Analytics Viewer** — We are saving `~/.gxai/analytics_queue.json`, but we should create a lightweight offline CLI viewer (e.g. `bun run analytics`) to inspect local telemetry runs.
+- [x] ~~**Local Analytics Viewer**~~ — ✅ DONE. `bun run analytics` (or `gx --analytics` through the main binary) triggers a beautifully formatted colorized terminal output UI listing all offline-queued telemetry logs stored in `~/.gxai/analytics_queue.json`, supporting truncations and direct queue flushing via `--clear`.
 - [x] ~~**Analytics Dashboard Polish**~~ — ✅ DONE. The `sendAnalytics` function in `agent.ts` now uses an offline queue (`~/.gxai/analytics_queue.json`) to persist inference telemetry if the `analyticsUrl` endpoint is unreachable. The queue is automatically flushed on the next successful telemetry request, ensuring no data loss during network outages or dashboard downtime. Tests are running cleanly in `test/analytics.test.ts`.
 - [x] ~~**Streaming nested object support**~~ — ✅ DONE. Verified engine perfectly handles arbitrary deep object nesting (> 3 levels) thanks to `tagStack.join("_")` inside the realtime XML progressive chunk parser, and added an explicit recursive boundary mock test in `test/streaming.test.ts` to guarantee it never regresses.
 

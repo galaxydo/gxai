@@ -8,6 +8,9 @@
   "bin": {
     "gx": "./src/cli.ts"
   },
+  "scripts": {
+    "analytics": "bun run ./src/cli.ts --analytics"
+  },
   "files": [
     "src",
     "app"
