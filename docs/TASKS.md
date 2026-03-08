@@ -8,7 +8,7 @@
 
 ## 🟢 Priority: Features
 - [ ] **Integration test suite** — Current tests are unit-only. Add integration tests that hit real LLM APIs (gated behind env vars) to verify end-to-end flows.
-- [ ] **CLI improvements** — `gx` CLI only supports `--analytics`. Add `--health` (runs healthCheck), `--version`, and `--dashboard` commands.
+- [x] **CLI improvements** — Added `--health` (checks runtime, deps, API keys, analytics queue), `--version`/`-v` (prints version+runtime+platform). Updated help text with examples.
 - [ ] **npm publish automation** — Add GitHub Actions workflow for automated npm publishing on tag push.
 
 ## 📝 Architecture Notes
