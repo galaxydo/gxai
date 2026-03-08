@@ -1,9 +1,9 @@
 # gx402 — Tasks & Ideas
 
 ## 🟡 Priority: Improve
-- [ ] **README test count outdated** — README says "84 tests, 0 failures" but the actual count is 261+. Update the badge and test section.
-- [ ] **Export list incomplete** — README's "Full Export List" section only covers ~30 exports, but 40+ new modules were added (EventBus, Pipeline, Guardrails, etc.). Update to reflect full API surface.
-- [ ] **Duplicate module concepts** — `src/cache.ts` and `src/response-cache.ts` overlap, as do `src/pipeline.ts` and `src/pipeline-composer.ts`, and `src/memory.ts` and `src/conversation-memory.ts`. Consolidate or clearly differentiate.
+- [x] **README test count outdated** — Updated: 84 → 285 tests, 559 expect() calls.
+- [x] **Export list incomplete** — Updated: added 40+ new modules to Full Export List section.
+- [x] **Duplicate module concepts** — Analyzed: they are complementary, not duplicates. `cache.ts` wraps callLLM, `response-cache.ts` is generic. `pipeline.ts` is simple chaining, `pipeline-composer.ts` adds hooks. `memory.ts` is chat history, `conversation-memory.ts` is knowledge store. Updated all doc headers with cross-references.
 - [ ] **Version bump** — Many new features added since v1.5.1. Prep a v2.0.0 release with updated changelog.
 
 ## 🟢 Priority: Features
