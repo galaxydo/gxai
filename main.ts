@@ -1,7 +1,7 @@
 // @ts-nocheck — Legacy monolithic file; use src/ modules instead
 import { z } from "zod";
 
-import { measure } from "@ments/utils";
+import { measure } from "measure-fn";
 
 import * as solanaWeb3 from "@solana/web3.js";
 import bs58 from "bs58";

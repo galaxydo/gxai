@@ -1,6 +1,6 @@
 import { objToXml, xmlToObj } from '../src/xml';
 
-import { measureSync } from '@ments/utils';
+import { measureSync } from 'measure-fn';
 
 if (import.meta.env.NODE_ENV === "test") {
   const { test, expect, describe } = await import('bun:test');
