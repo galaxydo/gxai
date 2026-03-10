@@ -869,7 +869,10 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       undefined;
 
     const isOpenAIFamily = this.config.llm.startsWith('gpt') || this.config.llm.startsWith('o4-');
-    const responseFormat = isOpenAIFamily ? {
+    const isGeminiFamily = this.config.llm.startsWith('gemini');
+    const supportsJsonSchema = isOpenAIFamily || isGeminiFamily;
+
+    const responseFormat = supportsJsonSchema ? {
       type: "json_schema",
       json_schema: {
         name: "gxai_output",
@@ -885,7 +888,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
     const obj: any = { input };
 
-    if (!isOpenAIFamily) {
+    if (!supportsJsonSchema) {
       obj.output_format = this.getOutputFormatDescription();
       obj.task = this.generateTaskDescription();
     }
@@ -917,7 +920,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       });
     }
 
-    if (isOpenAIFamily) {
+    if (supportsJsonSchema) {
       messages.push({ role: "system", content: "You must precisely follow the json output schema without deviation." });
     }
     messages.push({ role: "user", content: `<request>\n${userPrompt}\n</request>` });
@@ -943,7 +946,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       }
     }
 
-    if (isOpenAIFamily && !streamingCallback) {
+    if (supportsJsonSchema && !streamingCallback) {
       try {
         return JSON.parse(response);
       } catch (e) {

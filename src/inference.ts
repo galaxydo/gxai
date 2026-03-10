@@ -223,9 +223,17 @@ export async function callLLM(
       }
     }
 
+    const generationConfig: Record<string, any> = { temperature, maxOutputTokens: maxTokens };
+
+    // Gemini structured output: convert OpenAI-style json_schema to Gemini responseSchema
+    if (response_format?.type === 'json_schema' && response_format.json_schema?.schema) {
+      generationConfig.responseMimeType = 'application/json';
+      generationConfig.responseSchema = response_format.json_schema.schema;
+    }
+
     body = {
       contents,
-      generationConfig: { temperature, maxOutputTokens: maxTokens },
+      generationConfig,
       ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
     };
 
@@ -683,6 +691,30 @@ if (import.meta.env.NODE_ENV === "test") {
       // Should be plain string, not array
       expect(typeof userMsg.content).toBe('string');
       expect(userMsg.content).toBe('Just text');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini structured output: response_format adds responseMimeType and responseSchema', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"answer": "42"}' }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }));
+    }) as any;
+    try {
+      const schema = { type: 'object', properties: { answer: { type: 'string' } } };
+      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'test' }], {
+        response_format: { type: 'json_schema', json_schema: { name: 'test', schema } }
+      });
+      // generationConfig should include responseMimeType and responseSchema
+      expect(capturedBody.generationConfig.responseMimeType).toBe('application/json');
+      expect(capturedBody.generationConfig.responseSchema).toEqual(schema);
+      expect(result).toContain('42');
     } finally {
       globalThis.fetch = originalFetch;
     }
