@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/gx402.svg)](https://badge.fury.io/js/gx402)
 [![Bun](https://img.shields.io/badge/Bun-tested-blueviolet)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-285%20pass-brightgreen)](https://bun.sh/)
+[![Tests](https://img.shields.io/badge/tests-327%20pass-brightgreen)](https://bun.sh/)
 
 **Agentic AI framework for TypeScript.** Structured I/O via Zod, real-time streaming, multi-provider LLM support, tool orchestration via MCP, automatic Solana x402 payments, and production-grade safeguards — all in a single package.
 
@@ -229,6 +229,27 @@ const json = loop.state.toJSON(); // { iteration, toolHistory, ... }
 const restored = LoopAgent.fromJSON(json, config);
 ```
 
+### Session Persistence
+
+Persist loop state via SessionManager (alternative to file checkpoints):
+
+```typescript
+import { LoopAgent, SessionManager } from 'gx402';
+
+const session = new SessionManager();
+const loop = new LoopAgent({
+  llm: 'gpt-4o-mini',
+  session,
+  // ...config
+});
+
+// State auto-saved to session after each iteration
+await loop.execute('Build a script');
+
+// Resume from session:
+const resumed = LoopAgent.fromSession(session, config);
+```
+
 ## Cost Controls
 
 ### Budget Guard
@@ -431,7 +452,7 @@ View queued analytics: `bun run analytics` or `gx --analytics`
 ## Testing
 
 ```bash
-bun test   # 285 tests, 0 failures, 559 expect() calls
+bun test   # 327 tests, 0 failures, 603 expect() calls
 ```
 
 ## Full Export List
