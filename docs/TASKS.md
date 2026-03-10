@@ -20,8 +20,10 @@
 - [x] ~~**Multi-turn Agent sessions**~~ — N/A. `SessionManager` is a standalone utility (not wired into Agent). Already has 5 unit tests covering set/get, snapshot, serialize/restore, has/delete, and expiration. No integration test needed — it doesn't hit LLM APIs.
 
 ## 🟢 Priority: Backlog
-- [ ] **Wire SessionManager into Agent** — Add optional `session` field to AgentConfig so Agent can automatically persist conversation history + outputs across runs. This would enable true multi-turn agentic workflows.
+- [x] ~~**Wire SessionManager into Agent**~~ — ✅ DONE. Added optional `session` field to AgentConfig. Agent auto-restores ConversationMemory from session on first run, auto-saves memory + usage + lastRunAt after each successful run. Non-fatal error handling. 3 new tests. Total: 323 tests, 593 expect() calls.
 - [x] ~~**Response caching in callLLM**~~ — ✅ Already existed as `cachedCallLLM()` in `cache.ts`, exported from index. Added 5 inline tests: cache hit/miss, streaming bypass, TTL expiry, clearCache, different-input isolation. Total: 320 tests, 586 expect() calls.
+- [ ] **npm version bump + publish** — Current npm version is likely behind master. Review changes, bump to next minor/patch, publish.
+- [ ] **LoopAgent checkpoint persistence** — LoopAgent's checkpointing is in-memory only. Wire to SessionManager for resume-after-crash.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
