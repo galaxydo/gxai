@@ -33,6 +33,12 @@ export interface LoopConfig {
     contextWindow?: number;
     /** Path to auto-save state after each iteration. Enables crash recovery via `LoopAgent.fromCheckpoint()`. */
     checkpointPath?: string;
+    /** Optional SessionManager for in-memory/pluggable checkpoint persistence.
+     * When provided, state is saved to session after each iteration and
+     * restored via `LoopAgent.fromSession(session, config)`.
+     * Can coexist with `checkpointPath` — both are written simultaneously.
+     */
+    session?: any;
     outcomes: LoopOutcome[];
 }
 
@@ -305,24 +311,54 @@ export class LoopAgent {
         }
     }
 
+    /** Resume from a SessionManager checkpoint */
+    public static fromSession(session: any, config: LoopConfig): LoopAgent | null {
+        try {
+            session.load();
+            const savedState = session.get('loopState');
+            if (savedState && typeof savedState === 'object' && 'iteration' in savedState) {
+                return new LoopAgent(config, savedState as LoopState);
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
     /** Save current state to checkpoint file */
     private saveCheckpoint(): void {
-        if (!this.config.checkpointPath) return;
-        try {
-            const dir = path.dirname(this.config.checkpointPath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(this.config.checkpointPath, this.toJSON(), 'utf-8');
-        } catch {
-            // Checkpoint write failure is non-fatal
+        // File-based checkpoint
+        if (this.config.checkpointPath) {
+            try {
+                const dir = path.dirname(this.config.checkpointPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(this.config.checkpointPath, this.toJSON(), 'utf-8');
+            } catch { /* non-fatal */ }
+        }
+        // Session-based checkpoint
+        if (this.config.session) {
+            try {
+                this.config.session.set('loopState', this.state);
+                this.config.session.set('lastCheckpointAt', Date.now());
+                this.config.session.save();
+            } catch { /* non-fatal */ }
         }
     }
 
     /** Remove checkpoint file (called on successful completion) */
     private removeCheckpoint(): void {
-        if (!this.config.checkpointPath) return;
-        try {
-            if (fs.existsSync(this.config.checkpointPath)) fs.unlinkSync(this.config.checkpointPath);
-        } catch { }
+        if (this.config.checkpointPath) {
+            try {
+                if (fs.existsSync(this.config.checkpointPath)) fs.unlinkSync(this.config.checkpointPath);
+            } catch { }
+        }
+        if (this.config.session) {
+            try {
+                this.config.session.set('loopState', null);
+                this.config.session.set('completedAt', Date.now());
+                this.config.session.save();
+            } catch { }
+        }
     }
 
     /**

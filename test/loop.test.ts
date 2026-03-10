@@ -142,3 +142,107 @@ describe('LoopAgent Tests', () => {
         }
     });
 });
+
+// ─── LoopAgent Session Persistence ──────────────────────
+
+describe('LoopAgent Session Persistence', () => {
+    /** Minimal SessionManager mock */
+    function createMockSession() {
+        const store = new Map<string, any>();
+        return {
+            store,
+            set(key: string, value: any) { store.set(key, value); },
+            get(key: string) { return store.get(key); },
+            load() { /* no-op for in-memory mock */ },
+            save() { /* no-op for in-memory mock */ },
+        };
+    }
+
+    const baseConfig = {
+        llm: 'gpt-4o-mini' as const,
+        maxIterations: 3,
+        outcomes: [
+            {
+                description: 'Always met',
+                validate: async () => ({ met: true, reason: 'always' }),
+            },
+        ],
+    };
+
+    test('fromSession() restores state from session', () => {
+        const session = createMockSession();
+        session.set('loopState', {
+            iteration: 2,
+            toolHistory: [{ tool: 'exec', params: { command: 'echo hi' } }],
+            outcomeResults: [],
+        });
+
+        const agent = LoopAgent.fromSession(session, baseConfig);
+        expect(agent).not.toBeNull();
+        expect(agent!.state.iteration).toBe(2);
+        expect(agent!.state.toolHistory.length).toBe(1);
+    });
+
+    test('fromSession() returns null when no saved state', () => {
+        const session = createMockSession();
+        expect(LoopAgent.fromSession(session, baseConfig)).toBeNull();
+    });
+
+    test('session checkpoint is saved after each iteration', async () => {
+        const session = createMockSession();
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => {
+            return new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }));
+        }) as any;
+
+        try {
+            const agent = new LoopAgent({ ...baseConfig, session });
+            await agent.execute('test task');
+
+            // After completion, session should have completedAt (from removeCheckpoint)
+            expect(session.get('completedAt')).toBeDefined();
+            expect(typeof session.get('completedAt')).toBe('number');
+            // loopState should be cleared on success
+            expect(session.get('loopState')).toBeNull();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('session checkpoint persists state during execution', async () => {
+        const session = createMockSession();
+        let fetchCount = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => {
+            fetchCount++;
+            const content = fetchCount === 1
+                ? '<tool_call>\n{"tool": "exec", "params": {"command": "echo hi"}}\n</tool_call>'
+                : 'Done!';
+            return new Response(JSON.stringify({ choices: [{ message: { content } }] }));
+        }) as any;
+
+        try {
+            const neverMetConfig = {
+                ...baseConfig,
+                maxIterations: 2,
+                outcomes: [
+                    {
+                        description: 'Never met',
+                        validate: async () => ({ met: false, reason: 'always false' }),
+                    },
+                ],
+            };
+
+            const agent = new LoopAgent({ ...neverMetConfig, session });
+            await agent.execute('test task');
+
+            // After max iterations, loopState should be saved (not cleared since it didn't succeed)
+            const savedState = session.get('loopState');
+            expect(savedState).toBeDefined();
+            expect(savedState.iteration).toBe(1); // last iteration index
+            expect(session.get('lastCheckpointAt')).toBeDefined();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
