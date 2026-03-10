@@ -347,9 +347,23 @@ export async function callLLM(
       ? (u: string, o: RequestInit, desc: string) => customFetch(u, o, null, desc, progressCallback)
       : (u: string, o: RequestInit, _desc: string) => fetch(u, o);
 
+    // Retryable fetch: retries on 429/500/502/503 with exponential backoff
+    const retryableFetch = async (fetchFn: () => Promise<Response>, maxAttempts = 3, baseDelay = 2000): Promise<Response> => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const res = await fetchFn();
+        const retryable = [429, 500, 502, 503].includes(res.status);
+        if (!retryable || attempt === maxAttempts) return res;
+        // Parse Retry-After header (seconds) or use exponential backoff
+        const retryAfter = res.headers.get('retry-after');
+        const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : baseDelay * Math.pow(2, attempt - 1);
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+      throw new Error('Unreachable');
+    };
+
     if (!streamingCallback) {
       const content = await measure.assert(`LLM call ${llm}`, async () => {
-        const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} API`);
+        const res = await retryableFetch(() => doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} API`));
         const data = await res.json() as any;
         const { content, rawData } = validateProviderResponse(llm, data);
         lastTokenUsage = extractUsage(llm, rawData) || null;
@@ -357,7 +371,7 @@ export async function callLLM(
       });
       return content ?? '';
     } else {
-      const response = await doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} streaming`);
+      const response = await retryableFetch(() => doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} streaming`));
 
       const reader = response.body?.getReader();
       if (!reader) {
@@ -903,6 +917,44 @@ if (import.meta.env.NODE_ENV === "test") {
       await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], { signal: controller.signal });
       expect(capturedSignal).toBeDefined();
       expect(capturedSignal).toBe(controller.signal);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Retry Tests ──
+
+  test('retries on 429 and succeeds on second attempt', async () => {
+    let attempts = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      attempts++;
+      if (attempts === 1) {
+        return new Response('Rate limited', { status: 429 });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'retried ok' } }] }));
+    }) as any;
+    try {
+      const result = await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }]);
+      expect(attempts).toBe(2);
+      expect(result).toBe('retried ok');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not retry on non-retryable errors (400)', async () => {
+    let attempts = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      attempts++;
+      return new Response(JSON.stringify({ error: { message: 'bad request' } }), { status: 400 });
+    }) as any;
+    try {
+      // 400 is not retryable, so should fail after 1 attempt
+      // The response will fail at validation, but attempts should be 1
+      try { await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }]); } catch { }
+      expect(attempts).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
     }
