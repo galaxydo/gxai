@@ -16,8 +16,12 @@
 - [x] ~~**Provider response format validation**~~ — ✅ DONE. Added `OpenAIResponseSchema`, `AnthropicResponseSchema`, `GeminiResponseSchema` Zod schemas. `validateProviderResponse()` replaces inline optional chaining — now gives descriptive errors when providers change formats. Also fixed silent empty-string bug: switched `measure()` to `measure.assert()` for non-streaming path. 7 new inline tests. Total: 310 tests, 567 expect() calls.
 
 ## 🟢 Priority: New Features
-- [ ] **OpenAI o4-mini reasoning model support** — The `o4-` model prefix is detected but untested with integration tests. Add specific tests for reasoning model parameters (`max_completion_tokens` instead of `max_tokens`).
-- [ ] **Multi-turn Agent sessions** — `SessionManager` exists but has no integration test coverage. Add tests for multi-turn conversations with memory persistence.
+- [x] ~~**OpenAI o4-mini reasoning model support**~~ — ✅ DONE. 3 inline tests verifying `max_completion_tokens` (not `max_tokens`), forced `temperature: 1.0`, and response parsing. 2 integration tests (non-streaming + streaming with field extraction) gated behind `OPENAI_API_KEY`. Total: 315 tests, 575 expect() calls.
+- [x] ~~**Multi-turn Agent sessions**~~ — N/A. `SessionManager` is a standalone utility (not wired into Agent). Already has 5 unit tests covering set/get, snapshot, serialize/restore, has/delete, and expiration. No integration test needed — it doesn't hit LLM APIs.
+
+## 🟢 Priority: Backlog
+- [ ] **Wire SessionManager into Agent** — Add optional `session` field to AgentConfig so Agent can automatically persist conversation history + outputs across runs. This would enable true multi-turn agentic workflows.
+- [ ] **Response caching in callLLM** — Add opt-in caching to `callLLM` using `ResponseCache` to avoid re-hitting APIs for identical prompts during development.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
