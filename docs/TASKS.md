@@ -40,12 +40,15 @@
 
 ## 🟡 Priority: Improve (Backlog)
 - [x] ~~**Options-object API for callLLM**~~ — ✅ DONE. `callLLM`, `callLLMWithFallback`, and `cachedCallLLM` now accept `streaming`, `progress`, and `customFetch` on the options object. Old positional params still work (backwards compatible, marked `@deprecated`). All 15+ internal call sites in `agent.ts`, `cache.ts`, and `chat.ts` migrated. 1 new test. Total: 352 tests, 675 expect() calls.
+- [x] ~~**Streaming usage for Gemini**~~ — ✅ DONE. Both Gemini and OpenAI/Claude streaming now fallback to character-count estimation (~4 chars/token) when providers don't include usage metadata in SSE chunks. Prevents silent null `lastTokenUsage` after streaming calls. 2 new tests. Total: 354 tests, 684 expect() calls.
+
+## 🟢 Priority: Backlog
 - [ ] **Provider health check before routing** — Add `pingProvider(llm)` that HEAD-requests the provider's API endpoint. `callLLMWithFallback` could skip providers that are known-down instead of wasting time on failed requests.
-- [ ] **Streaming usage for Gemini** — Currently Gemini streaming only captures usage from the last SSE chunk's `usageMetadata`. Some Gemini models don't include it. Add fallback estimation from character count.
+- [ ] **Remove deprecated positional params (v3)** — After downstream consumers migrate to `options.streaming` / `options.progress` / `options.customFetch`, remove the legacy positional params from `callLLM`, `callLLMWithFallback`, and `cachedCallLLM`. Semver major bump.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 352 tests across 14 files, 675 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 354 tests across 14 files, 684 expect() calls.

@@ -373,6 +373,17 @@ export async function callLLM(
           }
         }
 
+        // Fallback: estimate usage if provider didn't include usageMetadata
+        if (!lastTokenUsage && fullResponse.length > 0) {
+          const inputChars = requestBodyStr.length;
+          const outputChars = fullResponse.length;
+          lastTokenUsage = {
+            inputTokens: Math.ceil(inputChars / 4),
+            outputTokens: Math.ceil(outputChars / 4),
+            totalTokens: Math.ceil(inputChars / 4) + Math.ceil(outputChars / 4),
+          };
+        }
+
         return fullResponse;
       }
 
@@ -589,6 +600,15 @@ export async function callLLM(
       // Set token usage from streaming
       if (hasStreamUsage) {
         lastTokenUsage = streamUsage;
+      } else if (fullResponse.length > 0) {
+        // Fallback: estimate usage when provider didn't send usage events (~4 chars/token)
+        const inputChars = requestBodyStr.length;
+        const outputChars = fullResponse.length;
+        lastTokenUsage = {
+          inputTokens: Math.ceil(inputChars / 4),
+          outputTokens: Math.ceil(outputChars / 4),
+          totalTokens: Math.ceil(inputChars / 4) + Math.ceil(outputChars / 4),
+        };
       }
 
       return fullResponse;
@@ -978,6 +998,59 @@ if (import.meta.env.NODE_ENV === "test") {
       // Usage from last chunk
       expect(lastTokenUsage).not.toBeNull();
       expect(lastTokenUsage!.inputTokens).toBe(5);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini streaming: estimates usage when usageMetadata missing', async () => {
+    const originalFetch = globalThis.fetch;
+    // SSE chunks WITHOUT usageMetadata
+    const sseData = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"estimated"}]}}]}\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseData) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      }
+    });
+    globalThis.fetch = (async () => new Response(stream)) as any;
+    try {
+      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'test' }], {
+        streaming: (update) => { },
+      });
+      expect(result).toBe('estimated');
+      // Should have fallback estimation (~4 chars/token)
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.outputTokens).toBeGreaterThan(0);
+      expect(lastTokenUsage!.inputTokens).toBeGreaterThan(0);
+      expect(lastTokenUsage!.totalTokens).toBe(lastTokenUsage!.inputTokens + lastTokenUsage!.outputTokens);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('OpenAI streaming: estimates usage when no usage events received', async () => {
+    // SSE chunks WITHOUT the final usage event (stream_options.include_usage not set)
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"fallback"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      }
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(stream)) as any;
+    try {
+      const result = await callLLM('gpt-4o-mini', [{ role: 'user', content: 'test' }], {
+        streaming: () => { },
+      });
+      expect(result).toContain('fallback');
+      // Should have fallback estimation
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.outputTokens).toBeGreaterThan(0);
+      expect(lastTokenUsage!.totalTokens).toBe(lastTokenUsage!.inputTokens + lastTokenUsage!.outputTokens);
     } finally {
       globalThis.fetch = originalFetch;
     }
