@@ -2,7 +2,7 @@
   "name": "gx402",
   "module": "src/index.ts",
   "main": "./src/index.ts",
-  "version": "2.13.0",
+  "version": "2.14.0",
   "type": "module",
   "private": false,
   "bin": {

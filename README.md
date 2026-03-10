@@ -9,9 +9,11 @@
 
 ## Why gx402?
 
-- **Structured I/O** — Zod schemas for input validation and output parsing. Type-safe end-to-end.
-- **4 LLM Providers** — OpenAI, Anthropic, Google Gemini, DeepSeek. Switch models with one line.
+- **Structured I/O** — Zod schemas for input validation and output parsing. Type-safe end-to-end. Structured output across all 4 providers.
+- **5 LLM Providers** — OpenAI, Anthropic, Google Gemini, DeepSeek, DeepSeek R1. Switch models with one line.
+- **Reasoning Models** — DeepSeek R1 and Gemini 2.5 thinking with unified `_reasoning` streaming and `reasoningContent` access.
 - **Streaming** — Token-by-token field updates with progressive content building.
+- **CLI Chat REPL** — `gx --chat` for interactive multi-model conversations from the terminal.
 - **LoopAgent** — Self-healing iterative agent with built-in file/exec tools and outcome predicates.
 - **MCP Tool Orchestration** — Auto-discover and invoke tools from MCP servers with parallel execution.
 - **Cost Controls** — Per-model pricing, budget guards, token tracking, and cost estimation.
@@ -38,10 +40,65 @@ export DEEPSEEK_API_KEY=...        # DeepSeek
 
 | Provider | Models | Env Variable |
 |----------|--------|--------------|
-| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-4`, `o4-mini-*` | `OPENAI_API_KEY` |
-| Google | `gemini-2.0-flash`, `gemini-2.5-pro` | `GEMINI_API_KEY` |
-| Anthropic | `claude-3-sonnet`, `claude-3-5-sonnet` | `ANTHROPIC_API_KEY` |
-| DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| OpenAI | `gpt-4o-mini`, `gpt-4o`, `o4-mini` | `OPENAI_API_KEY` |
+| Anthropic | `claude-sonnet-4`, `claude-3-5-haiku` | `ANTHROPIC_API_KEY` |
+| Google | `gemini-2.0-flash`, `gemini-2.5-flash`, `gemini-2.5-pro` | `GEMINI_API_KEY` |
+| DeepSeek | `deepseek-chat`, `deepseek-reasoner` | `DEEPSEEK_API_KEY` |
+
+## CLI Chat REPL
+
+Chat with any model directly from your terminal:
+
+```bash
+npx gx402 --chat                  # Default: gpt-4o-mini
+npx gx402 --chat --model claude   # Claude Sonnet 4
+npx gx402 --chat --model r1       # DeepSeek R1 (shows reasoning 💭)
+npx gx402 --chat --model gemini   # Gemini 2.5 Flash (shows thinking 💭)
+```
+
+In-session commands: `/model <name>`, `/models`, `/system <prompt>`, `/clear`, `/tokens`, `/quit`
+
+## Reasoning Models
+
+DeepSeek R1 and Gemini 2.5 chain-of-thought reasoning is exposed via a unified interface:
+
+```typescript
+import { callLLM, lastTokenUsage } from 'gx402';
+
+// Non-streaming: reasoning captured in lastTokenUsage
+const result = await callLLM('deepseek-reasoner', messages);
+console.log(lastTokenUsage.reasoningContent); // "Step 1: ..."
+
+// Streaming: reasoning arrives as _reasoning field
+await callLLM('gemini-2.5-pro-preview-05-06', messages, {}, undefined, (update) => {
+  if (update.field === '_reasoning') process.stdout.write(update.value); // thinking...
+  else process.stdout.write(update.value);                               // answer
+});
+```
+
+## Universal Structured Output
+
+All 4 providers support structured JSON output via the same `response_format` API:
+
+```typescript
+const result = await callLLM('claude-sonnet-4-20250514', messages, {
+  response_format: {
+    type: 'json_schema',
+    json_schema: {
+      name: 'extract_data',
+      schema: { type: 'object', properties: { name: { type: 'string' } } },
+    },
+  },
+});
+const parsed = JSON.parse(result); // { name: "John" }
+```
+
+| Provider | Mechanism |
+|---|---|
+| OpenAI | Native `json_schema` |
+| DeepSeek | OpenAI-compatible `json_schema` |
+| Gemini | `responseSchema` in `generationConfig` |
+| Anthropic | `tool_use` with forced `tool_choice` |
 
 ## Quick Start
 
