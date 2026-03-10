@@ -35,10 +35,11 @@
 - [x] ~~**Gemini 2.5 thinking mode**~~ — ✅ DONE. Gemini 2.5 Pro/Flash models now include `thinkingConfig: { includeThoughts: true }` in requests. Response schema updated for optional `thought` boolean on parts. Non-streaming: thought parts extracted to `lastTokenUsage.reasoningContent`, answer returned without thought text. Streaming: thought parts emitted as `_reasoning` field (same interface as DeepSeek R1). Unified `_reasoning` streaming field works across both DeepSeek R1 and Gemini 2.5. 3 new tests. Total: 346 tests, 664 expect() calls.
 - [x] ~~**Interactive chat REPL**~~ — ✅ DONE. `gx --chat` command: interactive terminal REPL with streaming responses, reasoning visibility (💭 _reasoning shown as dim gray), conversation memory across turns, `/model` switching, `/system` prompts, `/tokens` usage stats. Supports all providers via `--model` flag with shortcuts (gpt, claude, r1, gemini, etc.). Total: 346 tests, 664 expect() calls.
 - [x] ~~**Multi-model benchmark**~~ — ✅ DONE. `gx --bench` command: runs the same prompt across all providers with API keys in parallel. Ranked table output with 🏆 fastest, 💰 cheapest, per-model response time, token usage, cost, and truncated response. Shows 💭 reasoning from thinking models. Custom `--prompt` flag. Total: 346 tests, 664 expect() calls.
+- [x] ~~**Claude extended thinking**~~ — ✅ DONE. Claude Sonnet 4 and Opus models now auto-enable `thinking: { type: 'enabled', budget_tokens: 10000 }`. Response: thinking content blocks extracted to `lastTokenUsage.reasoningContent`. Streaming: thinking deltas emitted as `_reasoning` field. Completes reasoning support trifecta: DeepSeek R1 + Gemini 2.5 + Claude. 3 new tests. Total: 349 tests, 670 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 346 tests across 14 files, 664 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 349 tests across 14 files, 670 expect() calls.

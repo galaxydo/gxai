@@ -25,6 +25,9 @@ const AnthropicResponseSchema = z.object({
   content: z.array(z.object({
     type: z.string().optional(),
     text: z.string().optional(),
+    thinking: z.string().optional(),
+    id: z.string().optional(),
+    name: z.string().optional(),
     input: z.any().optional(),
   })).min(1, 'Anthropic response has no content blocks'),
   usage: z.object({
@@ -54,13 +57,15 @@ function validateProviderResponse(llm: string, data: any): { content: string; ra
   try {
     if (llm.includes('claude')) {
       const parsed = AnthropicResponseSchema.parse(data);
-      // Check for tool_use blocks (structured output via forced tool_choice)
+      // Anthropic structured output: extract tool_use input as JSON
       const toolBlock = parsed.content.find(b => b.type === 'tool_use' && b.input);
       if (toolBlock) {
         return { content: JSON.stringify(toolBlock.input), rawData: data };
       }
-      const textBlock = parsed.content.find(b => b.text);
-      return { content: textBlock?.text || '', rawData: data };
+      // Skip thinking blocks — only return text content
+      const textBlocks = parsed.content.filter(b => b.type === 'text' && b.text);
+      const textContent = textBlocks.length > 0 ? textBlocks.map(b => b.text).join('') : '';
+      return { content: textContent || parsed.content.find(b => b.text)?.text || '', rawData: data };
     } else if (llm.includes('gemini')) {
       const parsed = GeminiResponseSchema.parse(data);
       // Skip thought parts — only return the model's final answer
@@ -105,11 +110,18 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
   }
   // Anthropic format
   if (data?.usage?.input_tokens !== undefined) {
-    return {
+    const usage: TokenUsage = {
       inputTokens: data.usage.input_tokens,
       outputTokens: data.usage.output_tokens || 0,
       totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
     };
+    // Claude extended thinking: extract thinking blocks
+    const content = data?.content;
+    if (content && Array.isArray(content)) {
+      const thoughts = content.filter((b: any) => b.type === 'thinking' && b.thinking).map((b: any) => b.thinking);
+      if (thoughts.length > 0) usage.reasoningContent = thoughts.join('\n');
+    }
+    return usage;
   }
   // Gemini format
   if (data?.usageMetadata?.promptTokenCount !== undefined) {
@@ -206,12 +218,16 @@ export async function callLLM(
         return { role: m.role, content: m.content };
       });
 
+      // Claude extended thinking: enable for Sonnet 4+ and Opus models
+      const supportsThinking = llm.includes('claude-sonnet-4') || llm.includes('claude-opus');
+
       body = {
         model: llm,
         max_tokens: maxTokens,
         messages: anthropicMessages,
         stream: !!streamingCallback,
-        ...(systemParam !== undefined && { system: systemParam })
+        ...(systemParam !== undefined && { system: systemParam }),
+        ...(supportsThinking && { thinking: { type: 'enabled', budget_tokens: 10000 } }),
       };
 
       // Anthropic structured output: use tool_use with forced tool_choice
@@ -453,7 +469,23 @@ export async function callLLM(
               streamUsage.totalTokens = streamUsage.inputTokens + streamUsage.outputTokens;
               hasStreamUsage = true;
             }
-            return data.type === "content_block_delta" && data.delta?.text ? data.delta.text : "";
+            // Track the current content block type for thinking vs text
+            if (data.type === "content_block_start" && data.content_block?.type === "thinking") {
+              // Mark we're in a thinking block — use a transient flag
+              (streamUsage as any).__thinkingBlock = true;
+            }
+            if (data.type === "content_block_start" && data.content_block?.type === "text") {
+              (streamUsage as any).__thinkingBlock = false;
+            }
+            if (data.type === "content_block_delta") {
+              // Claude thinking: delta.thinking for thinking blocks
+              if (data.delta?.thinking && streamingCallback) {
+                streamingCallback({ stage: "streaming", field: "_reasoning", value: data.delta.thinking });
+                return "";
+              }
+              return data.delta?.text || "";
+            }
+            return "";
           } else {
             // OpenAI / DeepSeek: usage appears in final chunk when stream_options.include_usage is true
             if (data.usage) {
@@ -1188,6 +1220,84 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(reasoningChunks).toEqual(['thinking...']);
       expect(contentChunks).toEqual(['The answer', ' is 42']);
       expect(result).toBe('The answer is 42');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Claude Extended Thinking Tests ──
+
+  test('Claude Sonnet 4: thinking config included in request body', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'answer' }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }));
+    }) as any;
+    try {
+      await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'test' }]);
+      expect(capturedBody.thinking).toEqual({ type: 'enabled', budget_tokens: 10000 });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Claude: thinking blocks extracted to reasoningContent, text returned clean', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({
+        content: [
+          { type: 'thinking', thinking: 'Let me think about this step by step...' },
+          { type: 'text', text: 'The answer is 42.' },
+        ],
+        usage: { input_tokens: 15, output_tokens: 25 },
+      }))
+    ) as any;
+    try {
+      const result = await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'test' }]);
+      expect(result).toBe('The answer is 42.');
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.reasoningContent).toBe('Let me think about this step by step...');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Claude streaming: thinking deltas emitted as _reasoning field', async () => {
+    const sseData = [
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}\n\n',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}\n\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"thinking":"step by step..."}}\n\n',
+      'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+      'data: {"type":"content_block_delta","index":1,"delta":{"text":"The answer"}}\n\n',
+      'data: {"type":"content_block_delta","index":1,"delta":{"text":" is 42"}}\n\n',
+      'data: {"type":"message_delta","usage":{"output_tokens":20}}\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseData) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      }
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(stream)) as any;
+    try {
+      const reasoningChunks: string[] = [];
+      const contentChunks: string[] = [];
+      const result = await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'test' }], {},
+        undefined,
+        (update) => {
+          if (update.field === '_reasoning') reasoningChunks.push(update.value);
+        }
+      );
+      expect(reasoningChunks).toEqual(['step by step...']);
+      // The text content goes through the XML tag parser, verify via result string
+      expect(result).toContain('The answer');
     } finally {
       globalThis.fetch = originalFetch;
     }

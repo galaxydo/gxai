@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/gx402.svg)](https://badge.fury.io/js/gx402)
 [![Bun](https://img.shields.io/badge/Bun-tested-blueviolet)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-346%20pass-brightgreen)](https://bun.sh/)
+[![Tests](https://img.shields.io/badge/tests-349%20pass-brightgreen)](https://bun.sh/)
 
 **Agentic AI framework for TypeScript.** Structured I/O via Zod, real-time streaming, multi-provider LLM support, tool orchestration via MCP, automatic Solana x402 payments, and production-grade safeguards — all in a single package.
 
@@ -554,7 +554,7 @@ View queued analytics: `bun run analytics` or `gx --analytics`
 ## Testing
 
 ```bash
-bun test   # 346 tests, 0 failures, 664 expect() calls
+bun test   # 349 tests, 0 failures, 670 expect() calls
 ```
 
 ## Full Export List
