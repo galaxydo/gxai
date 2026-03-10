@@ -134,6 +134,38 @@ describe('Integration: callLLM', () => {
         expect(lastTokenUsage).not.toBeNull();
         console.log(`✅ DeepSeek non-streaming — tokens: ${lastTokenUsage!.totalTokens}`);
     }, { timeout: 30_000 });
+
+    test('OpenAI o4-mini — reasoning model non-streaming', async () => {
+        if (skipIfNoKey('OPENAI_API_KEY', 'OpenAI o4-mini')) return;
+
+        const result = await callLLM(
+            'o4-mini',
+            [{ role: 'user', content: 'What is 7 * 8? Reply with just the number.' }],
+            { maxTokens: 1000 },
+        );
+
+        expect(result).toContain('56');
+        expect(lastTokenUsage).not.toBeNull();
+        expect(lastTokenUsage!.inputTokens).toBeGreaterThan(0);
+        console.log(`✅ o4-mini non-streaming — tokens: ${lastTokenUsage!.totalTokens}`);
+    }, { timeout: 60_000 });
+
+    test('OpenAI o4-mini — streaming with field extraction', async () => {
+        if (skipIfNoKey('OPENAI_API_KEY', 'OpenAI o4-mini streaming')) return;
+
+        const updates: StreamingUpdate[] = [];
+        const result = await callLLM(
+            'o4-mini',
+            [{ role: 'user', content: 'Reply with: <answer>reasoning_works</answer>' }],
+            { maxTokens: 1000 },
+            null,
+            (update) => updates.push(update),
+        );
+
+        expect(result).toContain('reasoning_works');
+        expect(updates.length).toBeGreaterThan(0);
+        console.log(`✅ o4-mini streaming — ${updates.length} chunks`);
+    }, { timeout: 60_000 });
 });
 
 // ─── 2. callLLMWithFallback ─────────────────────────────

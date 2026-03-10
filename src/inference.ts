@@ -499,4 +499,56 @@ if (import.meta.env.NODE_ENV === "test") {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('o4-mini uses max_completion_tokens instead of max_tokens', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'reasoning response' } }] }));
+    }) as any;
+    try {
+      await callLLM('o4-mini', [{ role: 'user', content: 'hi' }], { maxTokens: 4000 });
+      expect(capturedBody).not.toBeNull();
+      expect(capturedBody.model).toBe('o4-mini');
+      expect(capturedBody.max_completion_tokens).toBe(4000);
+      expect(capturedBody.max_tokens).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('o4-mini forces temperature to 1.0', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+    }) as any;
+    try {
+      // Even if user passes temperature: 0, o4-mini should force 1.0
+      await callLLM('o4-mini', [{ role: 'user', content: 'hi' }], { temperature: 0 });
+      expect(capturedBody.temperature).toBe(1.0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('o4-mini non-streaming response parses correctly', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({
+        choices: [{ message: { content: 'I reasoned step by step and the answer is 42' } }],
+        usage: { prompt_tokens: 50, completion_tokens: 200, total_tokens: 250 },
+      }))
+    ) as any;
+    try {
+      const result = await callLLM('o4-mini', [{ role: 'user', content: 'Solve this' }], {});
+      expect(result).toContain('42');
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.totalTokens).toBe(250);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 }

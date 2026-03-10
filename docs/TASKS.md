@@ -13,7 +13,7 @@
 
 ## 🟡 Priority: Improve
 - [x] ~~**CI integration test with real API**~~ — ✅ DONE. Created `integration.yml` workflow: nightly at 03:00 UTC + manual trigger, gated by `HAS_INTEGRATION_KEYS` repo variable, uses `GEMINI_API_KEY` secret. Also fixed `ci.yml` — removed `|| true` that was swallowing all test failures. Pushed to master.
-- [ ] **Provider response format validation** — Add Zod schemas to validate raw LLM API responses before extracting content, to get better error messages when providers change their response format.
+- [x] ~~**Provider response format validation**~~ — ✅ DONE. Added `OpenAIResponseSchema`, `AnthropicResponseSchema`, `GeminiResponseSchema` Zod schemas. `validateProviderResponse()` replaces inline optional chaining — now gives descriptive errors when providers change formats. Also fixed silent empty-string bug: switched `measure()` to `measure.assert()` for non-streaming path. 7 new inline tests. Total: 310 tests, 567 expect() calls.
 
 ## 🟢 Priority: New Features
 - [ ] **OpenAI o4-mini reasoning model support** — The `o4-` model prefix is detected but untested with integration tests. Add specific tests for reasoning model parameters (`max_completion_tokens` instead of `max_tokens`).
