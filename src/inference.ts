@@ -23,7 +23,9 @@ const OpenAIResponseSchema = z.object({
 
 const AnthropicResponseSchema = z.object({
   content: z.array(z.object({
-    text: z.string(),
+    type: z.string().optional(),
+    text: z.string().optional(),
+    input: z.any().optional(),
   })).min(1, 'Anthropic response has no content blocks'),
   usage: z.object({
     input_tokens: z.number(),
@@ -51,7 +53,13 @@ function validateProviderResponse(llm: string, data: any): { content: string; ra
   try {
     if (llm.includes('claude')) {
       const parsed = AnthropicResponseSchema.parse(data);
-      return { content: parsed.content[0]!.text, rawData: data };
+      // Check for tool_use blocks (structured output via forced tool_choice)
+      const toolBlock = parsed.content.find(b => b.type === 'tool_use' && b.input);
+      if (toolBlock) {
+        return { content: JSON.stringify(toolBlock.input), rawData: data };
+      }
+      const textBlock = parsed.content.find(b => b.text);
+      return { content: textBlock?.text || '', rawData: data };
     } else if (llm.includes('gemini')) {
       const parsed = GeminiResponseSchema.parse(data);
       return { content: parsed.candidates[0]!.content.parts[0]!.text, rawData: data };
@@ -190,6 +198,17 @@ export async function callLLM(
         stream: !!streamingCallback,
         ...(systemParam !== undefined && { system: systemParam })
       };
+
+      // Anthropic structured output: use tool_use with forced tool_choice
+      if (response_format?.type === 'json_schema' && response_format.json_schema?.schema) {
+        const toolName = response_format.json_schema.name || 'structured_output';
+        (body as any).tools = [{
+          name: toolName,
+          description: 'Return structured output matching the required schema',
+          input_schema: response_format.json_schema.schema,
+        }];
+        (body as any).tool_choice = { type: 'tool', name: toolName };
+      }
     } else if (llm.includes("deepseek")) {
       if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
       headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
@@ -958,5 +977,53 @@ if (import.meta.env.NODE_ENV === "test") {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  // ── Anthropic Structured Output Tests ──
+
+  test('Anthropic structured output: sends tools + tool_choice when response_format set', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({
+        content: [{ type: 'tool_use', id: 'tu_1', name: 'extract_data', input: { name: 'test', age: 25 } }],
+        usage: { input_tokens: 100, output_tokens: 50 },
+      }));
+    }) as any;
+    try {
+      const result = await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'extract data' }], {
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'extract_data',
+            schema: { type: 'object', properties: { name: { type: 'string' }, age: { type: 'number' } } },
+          },
+        },
+      });
+      // Verify tools + tool_choice were sent
+      expect(capturedBody.tools).toHaveLength(1);
+      expect(capturedBody.tools[0].name).toBe('extract_data');
+      expect(capturedBody.tool_choice).toEqual({ type: 'tool', name: 'extract_data' });
+      // Verify response is JSON-stringified tool input
+      const parsed = JSON.parse(result);
+      expect(parsed.name).toBe('test');
+      expect(parsed.age).toBe(25);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Anthropic tool_use response parsing extracts input correctly', () => {
+    const data = {
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: 'my_tool', input: { key: 'value', num: 42 } }
+      ],
+      usage: { input_tokens: 10 },
+    };
+    const parsed = AnthropicResponseSchema.parse(data);
+    const toolBlock = parsed.content.find(b => b.type === 'tool_use' && b.input);
+    expect(toolBlock).toBeDefined();
+    expect(JSON.stringify(toolBlock!.input)).toBe('{"key":"value","num":42}');
   });
 }

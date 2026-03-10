@@ -29,10 +29,11 @@
 - [x] ~~**Gemini streaming**~~ — ✅ DONE. Gemini now uses `:streamGenerateContent?alt=sse` when `streamingCallback` is provided. SSE chunks parsed for text deltas + usage metadata. Previously Gemini silently ignored streaming requests. 2 new tests verifying URL routing and delta delivery. Total: 334 tests, 631 expect() calls.
 - [x] ~~**Request abort + timeout**~~ — ✅ DONE. `callLLM` options now accept `signal` (AbortSignal) and `timeoutMs`. Signal is passed to all fetch calls across all providers. When `timeoutMs` is set, an internal AbortController auto-aborts after the timeout. User signal and timeout signal are composed via `AbortSignal.any()`. Finally block clears timeout on completion. 3 new tests (timeout abort, user signal, signal passthrough). Total: 337 tests, 635 expect() calls.
 - [x] ~~**Universal retry with backoff**~~ — ✅ DONE. All non-Gemini providers (OpenAI, Anthropic, DeepSeek) now retry on 429/500/502/503 with exponential backoff (2s × 2^attempt). Parses `Retry-After` header when present. Works for both streaming and non-streaming paths. Gemini already had `measure.retry`. 2 new tests (429 retry success, 400 no-retry). Total: 339 tests, 638 expect() calls.
+- [x] ~~**Anthropic structured output**~~ — ✅ DONE. Claude models now support structured output via `tool_use` + forced `tool_choice`. When `response_format` with `json_schema` is provided, the schema is converted to an Anthropic tool definition. The model's `tool_use` response block `input` is extracted as JSON. Schema updated to accept both `text` and `tool_use` content blocks. Completes structured output across all 4 providers. 2 new tests. Total: 341 tests, 645 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 339 tests across 14 files, 638 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 341 tests across 14 files, 645 expect() calls.
