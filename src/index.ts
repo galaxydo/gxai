@@ -23,7 +23,7 @@ export type { AgentMockConfig, MockSequenceItem } from './mock-engine';
 export { GxaiError, BudgetExceededError, ValidationError, ProviderError, AuthorizationError, MaxIterationsError, TimeoutError } from './errors';
 
 // Inference
-export { callLLM, lastTokenUsage, callLLMWithFallback } from './inference';
+export { callLLM, lastTokenUsage, callLLMWithFallback, OpenAIResponseSchema, AnthropicResponseSchema, GeminiResponseSchema } from './inference';
 export type { FallbackConfig } from './inference';
 
 // Cache

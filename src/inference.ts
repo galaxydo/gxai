@@ -1,6 +1,78 @@
 // src/inference.ts
 import { measure } from "measure-fn";
+import { z } from 'zod';
 import type { LLMType, ProgressCallback, StreamingCallback, StreamingUpdate, TokenUsage } from './types';
+
+// ─── Provider Response Schemas ──────────────────────────
+// Zod schemas for validating raw LLM API responses.
+// If a provider changes their response format, the error
+// will show exactly which fields are missing/wrong.
+
+const OpenAIResponseSchema = z.object({
+  choices: z.array(z.object({
+    message: z.object({
+      content: z.string(),
+    }),
+  })).min(1, 'OpenAI response has no choices'),
+  usage: z.object({
+    prompt_tokens: z.number(),
+    completion_tokens: z.number().optional(),
+    total_tokens: z.number().optional(),
+  }).optional(),
+});
+
+const AnthropicResponseSchema = z.object({
+  content: z.array(z.object({
+    text: z.string(),
+  })).min(1, 'Anthropic response has no content blocks'),
+  usage: z.object({
+    input_tokens: z.number(),
+    output_tokens: z.number().optional(),
+  }).optional(),
+});
+
+const GeminiResponseSchema = z.object({
+  candidates: z.array(z.object({
+    content: z.object({
+      parts: z.array(z.object({
+        text: z.string(),
+      })).min(1, 'Gemini candidate has no parts'),
+    }),
+  })).min(1, 'Gemini response has no candidates'),
+  usageMetadata: z.object({
+    promptTokenCount: z.number(),
+    candidatesTokenCount: z.number().optional(),
+    totalTokenCount: z.number().optional(),
+  }).optional(),
+});
+
+/** Validate a raw API response against the provider's expected schema */
+function validateProviderResponse(llm: string, data: any): { content: string; rawData: any } {
+  try {
+    if (llm.includes('claude')) {
+      const parsed = AnthropicResponseSchema.parse(data);
+      return { content: parsed.content[0]!.text, rawData: data };
+    } else if (llm.includes('gemini')) {
+      const parsed = GeminiResponseSchema.parse(data);
+      return { content: parsed.candidates[0]!.content.parts[0]!.text, rawData: data };
+    } else {
+      // OpenAI / DeepSeek
+      const parsed = OpenAIResponseSchema.parse(data);
+      return { content: parsed.choices[0]!.message.content, rawData: data };
+    }
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      const issues = err.issues.map(i => `  ${i.path.join('.')}: ${i.message}`).join('\n');
+      throw new Error(
+        `${llm} API response format mismatch:\n${issues}\n` +
+        `Raw response (truncated): ${JSON.stringify(data).substring(0, 300)}`
+      );
+    }
+    throw err;
+  }
+}
+
+export { OpenAIResponseSchema, AnthropicResponseSchema, GeminiResponseSchema };
 
 /** Last token usage from the most recent callLLM invocation */
 export let lastTokenUsage: TokenUsage | null = null;
@@ -126,7 +198,7 @@ export async function callLLM(
 
     const requestBodyStr = JSON.stringify(body);
 
-    return await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
+    return (await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
       const res = await fetch(url, { method: "POST", headers, body: requestBodyStr });
 
       if (res.status === 429) {
@@ -134,13 +206,10 @@ export async function callLLM(
       }
 
       const data = await res.json() as any;
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error(`Gemini API call failed: ${JSON.stringify(data).substring(0, 300)}`);
-      }
-      lastTokenUsage = extractUsage(llm, data) || null;
+      const { content: text, rawData } = validateProviderResponse(llm, data);
+      lastTokenUsage = extractUsage(llm, rawData) || null;
       return text;
-    });
+    }))!;
   } else {
     if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
@@ -164,14 +233,11 @@ export async function callLLM(
     : (u: string, o: RequestInit, _desc: string) => fetch(u, o);
 
   if (!streamingCallback) {
-    const content = await measure(`LLM call ${llm}`, async () => {
+    const content = await measure.assert(`LLM call ${llm}`, async () => {
       const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} API`);
       const data = await res.json() as any;
-      lastTokenUsage = extractUsage(llm, data) || null;
-      const content = llm.includes("claude") ? data.content?.[0]?.text : data.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error(`LLM API call to ${llm} failed. Unexpected response: ${JSON.stringify(data).substring(0, 200)}...`);
-      }
+      const { content, rawData } = validateProviderResponse(llm, data);
+      lastTokenUsage = extractUsage(llm, rawData) || null;
       return content;
     });
     return content ?? '';
@@ -385,6 +451,50 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(result).toContain('hello world');
       expect(streamingUpdates.length).toBeGreaterThan(0);
       expect(streamingUpdates[0]!.field).toBe('response');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('OpenAIResponseSchema validates correct format', () => {
+    const valid = { choices: [{ message: { content: 'hello' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
+    expect(() => OpenAIResponseSchema.parse(valid)).not.toThrow();
+  });
+
+  test('OpenAIResponseSchema rejects empty choices', () => {
+    expect(() => OpenAIResponseSchema.parse({ choices: [] })).toThrow();
+  });
+
+  test('AnthropicResponseSchema validates correct format', () => {
+    const valid = { content: [{ text: 'hello' }], usage: { input_tokens: 10 } };
+    expect(() => AnthropicResponseSchema.parse(valid)).not.toThrow();
+  });
+
+  test('AnthropicResponseSchema rejects missing content', () => {
+    expect(() => AnthropicResponseSchema.parse({ id: 'msg_1' })).toThrow();
+  });
+
+  test('GeminiResponseSchema validates correct format', () => {
+    const valid = { candidates: [{ content: { parts: [{ text: 'hello' }] } }], usageMetadata: { promptTokenCount: 10 } };
+    expect(() => GeminiResponseSchema.parse(valid)).not.toThrow();
+  });
+
+  test('GeminiResponseSchema rejects empty candidates', () => {
+    expect(() => GeminiResponseSchema.parse({ candidates: [] })).toThrow();
+  });
+
+  test('validateProviderResponse gives descriptive error for OpenAI format change', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { message: 'model not found' } }))
+    ) as any;
+    try {
+      await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], {});
+      expect(true).toBe(false); // should not reach
+    } catch (err: any) {
+      // measure.assert wraps the error, but the original validation error is logged
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message.length).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;
     }

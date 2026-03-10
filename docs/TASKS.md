@@ -12,7 +12,7 @@
 - [x] **npm publish automation** — GitHub Actions workflow (`.github/workflows/publish.yml`). On `v*` tag push: install deps → run tests → publish with provenance to npm. Requires `NPM_TOKEN` secret.
 
 ## 🟡 Priority: Improve
-- [ ] **CI integration test with real API** — Add a separate GitHub Actions workflow that runs `test/integration.test.ts` with a real `GEMINI_API_KEY` secret on a schedule (e.g., nightly) to catch provider API changes early.
+- [x] ~~**CI integration test with real API**~~ — ✅ DONE. Created `integration.yml` workflow: nightly at 03:00 UTC + manual trigger, gated by `HAS_INTEGRATION_KEYS` repo variable, uses `GEMINI_API_KEY` secret. Also fixed `ci.yml` — removed `|| true` that was swallowing all test failures. Pushed to master.
 - [ ] **Provider response format validation** — Add Zod schemas to validate raw LLM API responses before extracting content, to get better error messages when providers change their response format.
 
 ## 🟢 Priority: New Features
