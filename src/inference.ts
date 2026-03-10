@@ -239,6 +239,50 @@ export async function callLLM(
 
     const requestBodyStr = JSON.stringify(body);
 
+    if (streamingCallback) {
+      // Gemini streaming via SSE endpoint
+      const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:streamGenerateContent?alt=sse`;
+      const res = await fetch(streamUrl, { method: "POST", headers, body: requestBodyStr });
+      if (res.status === 429) throw new Error(`Rate limited (429)`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No readable stream from Gemini");
+
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+      let sseBuffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === "[DONE]") continue;
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const text = chunk?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (text) {
+              fullResponse += text;
+              streamingCallback({ stage: "streaming", field: "content", value: text });
+            }
+            // Extract usage from last chunk
+            if (chunk?.usageMetadata) {
+              lastTokenUsage = extractUsage(llm, chunk) || null;
+            }
+          } catch { /* skip malformed chunks */ }
+        }
+      }
+
+      return fullResponse;
+    }
+
+    // Non-streaming Gemini
     return (await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
       const res = await fetch(url, { method: "POST", headers, body: requestBodyStr });
 
@@ -715,6 +759,68 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(capturedBody.generationConfig.responseMimeType).toBe('application/json');
       expect(capturedBody.generationConfig.responseSchema).toEqual(schema);
       expect(result).toContain('42');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini streaming: uses streamGenerateContent SSE endpoint', async () => {
+    let capturedUrl = '';
+    const originalFetch = globalThis.fetch;
+    const sseData = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":" world"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3}}\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseData) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      }
+    });
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return new Response(stream);
+    }) as any;
+    try {
+      const updates: any[] = [];
+      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'hi' }], {}, null,
+        (update) => updates.push(update));
+
+      // Should use streamGenerateContent endpoint
+      expect(capturedUrl).toContain('streamGenerateContent');
+      expect(capturedUrl).toContain('alt=sse');
+      // Should have received streaming updates
+      expect(updates.length).toBe(2);
+      expect(updates[0].value).toBe('Hello');
+      expect(updates[1].value).toBe(' world');
+      // Full response should be concatenated
+      expect(result).toBe('Hello world');
+      // Usage from last chunk
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.inputTokens).toBe(5);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini non-streaming: uses generateContent endpoint (no streamingCallback)', async () => {
+    let capturedUrl = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'response text' }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 8 },
+      }));
+    }) as any;
+    try {
+      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'hi' }]);
+      // Should use non-streaming endpoint
+      expect(capturedUrl).toContain('generateContent');
+      expect(capturedUrl).not.toContain('stream');
+      expect(result).toBe('response text');
     } finally {
       globalThis.fetch = originalFetch;
     }
