@@ -43,7 +43,7 @@
 - [x] ~~**Streaming usage for Gemini**~~ — ✅ DONE. Both Gemini and OpenAI/Claude streaming now fallback to character-count estimation (~4 chars/token) when providers don't include usage metadata in SSE chunks. Prevents silent null `lastTokenUsage` after streaming calls. 2 new tests. Total: 354 tests, 684 expect() calls.
 
 ## 🟢 Priority: Backlog
-- [ ] **Provider health check before routing** — Add `pingProvider(llm)` that HEAD-requests the provider's API endpoint. `callLLMWithFallback` could skip providers that are known-down instead of wasting time on failed requests.
+- [x] ~~**Provider health check before routing**~~ — ✅ DONE. `pingProvider(llm)` HEAD-requests provider endpoints (5s timeout). Returns `{ ok, latencyMs, error? }`. 60s TTL health cache. `callLLMWithFallback` now accepts `skipUnhealthy: true` to pre-ping and skip dead providers. `getProviderEndpoint()`, `clearHealthCache()` exported. 5 new tests. Total: 359 tests, 698 expect() calls.
 - [ ] **Remove deprecated positional params (v3)** — After downstream consumers migrate to `options.streaming` / `options.progress` / `options.customFetch`, remove the legacy positional params from `callLLM`, `callLLMWithFallback`, and `cachedCallLLM`. Semver major bump.
 
 ## 📝 Architecture Notes
@@ -51,4 +51,4 @@
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 354 tests across 14 files, 684 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 359 tests across 14 files, 698 expect() calls.

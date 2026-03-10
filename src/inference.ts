@@ -141,6 +141,88 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
   return undefined;
 }
 
+// ─── Provider Health Check ──────────────────────────────
+// Lightweight HEAD ping to detect down providers before wasting
+// time on full LLM requests in fallback chains.
+
+/** Map an LLM model name to its provider's API endpoint */
+export function getProviderEndpoint(llm: string): string {
+  if (llm.includes('claude')) return 'https://api.anthropic.com/v1/messages';
+  if (llm.includes('deepseek')) return 'https://api.deepseek.com/v1/chat/completions';
+  if (llm.includes('gemini')) return `https://generativelanguage.googleapis.com/v1beta/models/${llm}`;
+  // Default: OpenAI-compatible
+  return 'https://api.openai.com/v1/chat/completions';
+}
+
+/** Result of a provider health check */
+export interface ProviderHealthResult {
+  ok: boolean;
+  latencyMs: number;
+  error?: string;
+}
+
+// Cache: remember health status for 60s to avoid hammering endpoints
+const _healthCache = new Map<string, { result: ProviderHealthResult; expiresAt: number }>();
+const HEALTH_CACHE_TTL = 60_000;
+
+/** Clear the provider health cache (useful for testing) */
+export function clearHealthCache(): void {
+  _healthCache.clear();
+}
+
+/**
+ * Ping a provider's API endpoint with a HEAD request.
+ * Returns { ok, latencyMs, error? }.
+ *
+ * - 2xx/4xx (auth errors) = provider is up (ok: true)
+ * - 5xx / network error / timeout = provider is down (ok: false)
+ * - Results are cached for 60s
+ */
+export async function pingProvider(llm: string): Promise<ProviderHealthResult> {
+  const endpoint = getProviderEndpoint(llm);
+  const cacheKey = endpoint;
+
+  // Return cached result if fresh
+  const cached = _healthCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.result;
+  }
+
+  const start = performance.now();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(endpoint, {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const latencyMs = Math.round(performance.now() - start);
+
+    // 2xx = healthy, 4xx = auth error but endpoint is reachable, 5xx = server error
+    const ok = res.status < 500;
+    const result: ProviderHealthResult = {
+      ok,
+      latencyMs,
+      ...(!ok && { error: `HTTP ${res.status}` }),
+    };
+
+    _healthCache.set(cacheKey, { result, expiresAt: Date.now() + HEALTH_CACHE_TTL });
+    return result;
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - start);
+    const result: ProviderHealthResult = {
+      ok: false,
+      latencyMs,
+      error: err.name === 'AbortError' ? 'Timeout (5s)' : (err.message || String(err)),
+    };
+    _healthCache.set(cacheKey, { result, expiresAt: Date.now() + HEALTH_CACHE_TTL });
+    return result;
+  }
+}
+
 export async function callLLM(
   llm: LLMType | string,
   messages: Array<LLMMessage | { role: string; content: string; cacheControl?: boolean }>,
@@ -629,6 +711,9 @@ export interface FallbackConfig {
  * Call LLM with automatic provider fallback.
  * Tries each provider in the chain sequentially until one succeeds.
  * Preserves lastTokenUsage from the successful call.
+ *
+ * When `skipUnhealthy: true`, pings all providers first and skips
+ * unreachable ones to avoid wasting time on known-down endpoints.
  */
 export async function callLLMWithFallback(
   fallback: FallbackConfig,
@@ -639,6 +724,8 @@ export async function callLLMWithFallback(
     streaming?: StreamingCallback;
     progress?: ProgressCallback;
     customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>;
+    /** Pre-ping providers and skip unreachable ones */
+    skipUnhealthy?: boolean;
   } = {},
   /** @deprecated Use `options.streaming` instead */
   _measureFn?: any,
@@ -649,13 +736,35 @@ export async function callLLMWithFallback(
   /** @deprecated Use `options.customFetch` instead */
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
-  const { providers, onFallback } = fallback;
+  let { providers, onFallback } = fallback;
   if (!providers.length) throw new Error('FallbackConfig requires at least one provider');
 
   // Merge options-object fields over positional params
   const resolvedStreaming = options.streaming ?? streamingCallback;
   const resolvedProgress = options.progress ?? progressCallback;
   const resolvedCustomFetch = options.customFetch ?? customFetch;
+
+  // ── Pre-flight health check ──
+  if (options.skipUnhealthy && providers.length > 1) {
+    const healthResults = await Promise.all(providers.map(p => pingProvider(p)));
+    const healthy: Array<LLMType | string> = [];
+
+    for (let i = 0; i < providers.length; i++) {
+      const hr = healthResults[i]!;
+      if (hr.ok) {
+        healthy.push(providers[i]!);
+      } else {
+        console.warn(`[gxai] Skipping unhealthy provider "${providers[i]}": ${hr.error} (${hr.latencyMs}ms)`);
+        onFallback?.(providers[i]!, hr.error || 'unhealthy', healthy[0] || providers[i + 1] || 'none');
+      }
+    }
+
+    // Only narrow list if at least one provider is healthy
+    if (healthy.length > 0) {
+      providers = healthy;
+    }
+    // else: fall through to try-each as-is (safety net)
+  }
 
   let lastError: Error | null = null;
 
@@ -1489,6 +1598,94 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(capturedSignal).toBeDefined();
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Provider Health Check Tests ──
+
+  test('getProviderEndpoint maps model names to correct endpoints', () => {
+    expect(getProviderEndpoint('claude-sonnet-4-20250514')).toBe('https://api.anthropic.com/v1/messages');
+    expect(getProviderEndpoint('deepseek-chat')).toBe('https://api.deepseek.com/v1/chat/completions');
+    expect(getProviderEndpoint('gemini-2.5-flash')).toContain('generativelanguage.googleapis.com');
+    expect(getProviderEndpoint('gemini-2.5-flash')).toContain('gemini-2.5-flash');
+    expect(getProviderEndpoint('gpt-4o')).toBe('https://api.openai.com/v1/chat/completions');
+    expect(getProviderEndpoint('gpt-4o-mini')).toBe('https://api.openai.com/v1/chat/completions');
+  });
+
+  test('pingProvider returns ok:true for reachable endpoint (mocked)', async () => {
+    clearHealthCache();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('', { status: 401 })) as any; // 4xx = reachable
+    try {
+      const result = await pingProvider('gpt-4o');
+      expect(result.ok).toBe(true);
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(result.error).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearHealthCache();
+    }
+  });
+
+  test('pingProvider returns ok:false for 500 server error', async () => {
+    clearHealthCache();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('Internal Server Error', { status: 500 })) as any;
+    try {
+      const result = await pingProvider('gpt-4o');
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('HTTP 500');
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearHealthCache();
+    }
+  });
+
+  test('pingProvider caches results for 60s', async () => {
+    clearHealthCache();
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    globalThis.fetch = (async () => { fetchCount++; return new Response('', { status: 200 }); }) as any;
+    try {
+      await pingProvider('gpt-4o');
+      await pingProvider('gpt-4o');
+      expect(fetchCount).toBe(1); // Second call should use cache
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearHealthCache();
+    }
+  });
+
+  test('callLLMWithFallback: skipUnhealthy skips dead provider', async () => {
+    clearHealthCache();
+    const originalFetch = globalThis.fetch;
+    let fetchCalls: string[] = [];
+    globalThis.fetch = (async (url: string, opts: any) => {
+      fetchCalls.push(opts?.method || 'POST');
+      if (opts?.method === 'HEAD') {
+        // First provider (claude) returns 500, second (gpt) returns 200
+        if (url.includes('anthropic')) return new Response('', { status: 500 });
+        return new Response('', { status: 200 });
+      }
+      // POST — actual LLM call
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'healthy provider' } }] }));
+    }) as any;
+    try {
+      const skippedProviders: string[] = [];
+      const result = await callLLMWithFallback(
+        {
+          providers: ['claude-sonnet-4-20250514', 'gpt-4o-mini'],
+          onFallback: (failed) => skippedProviders.push(failed),
+        },
+        [{ role: 'user', content: 'hello' }],
+        { skipUnhealthy: true },
+      );
+      expect(result).toBe('healthy provider');
+      // Claude should have been skipped due to 500 health check
+      expect(skippedProviders).toContain('claude-sonnet-4-20250514');
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearHealthCache();
     }
   });
 }

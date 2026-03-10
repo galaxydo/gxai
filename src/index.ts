@@ -23,8 +23,8 @@ export type { AgentMockConfig, MockSequenceItem } from './mock-engine';
 export { GxaiError, BudgetExceededError, ValidationError, ProviderError, AuthorizationError, MaxIterationsError, TimeoutError } from './errors';
 
 // Inference
-export { callLLM, lastTokenUsage, callLLMWithFallback, OpenAIResponseSchema, AnthropicResponseSchema, GeminiResponseSchema } from './inference';
-export type { FallbackConfig } from './inference';
+export { callLLM, lastTokenUsage, callLLMWithFallback, OpenAIResponseSchema, AnthropicResponseSchema, GeminiResponseSchema, pingProvider, getProviderEndpoint, clearHealthCache } from './inference';
+export type { FallbackConfig, ProviderHealthResult } from './inference';
 
 // Cache
 export { cachedCallLLM, clearCache, getCacheSize, getCacheStats } from './cache';
