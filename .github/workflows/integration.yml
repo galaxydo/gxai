@@ -1,0 +1,36 @@
+name: Integration Tests (Nightly)
+
+on:
+  schedule:
+    # Run every day at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # Only run if the GEMINI_API_KEY secret is configured
+    if: ${{ vars.HAS_INTEGRATION_KEYS == 'true' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run integration tests (Gemini)
+        run: bun test test/integration.test.ts --timeout 120000
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Provider**: Gemini (gemini-2.0-flash)" >> $GITHUB_STEP_SUMMARY

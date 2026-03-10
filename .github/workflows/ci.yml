@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run unit tests (skip LLM integration tests)
-        run: bun test --timeout 5000 || true
-        # Some tests require OPENAI_API_KEY — they'll fail in CI without secrets
+      - name: Type check
+        run: bunx tsc --noEmit || true
+
+      - name: Run unit tests
+        run: bun test --timeout 10000
+        # Integration tests auto-skip when API keys are not set (they return early)
