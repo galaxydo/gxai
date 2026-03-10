@@ -27,10 +27,11 @@
 - [x] ~~**Vision / image input**~~ — ✅ DONE. Messages now accept optional `images: ImageContent[]` for multimodal content. Per-provider conversion: OpenAI uses `image_url` content parts (URL or data URI), Anthropic uses `image` source blocks (base64 or URL), Gemini uses `inlineData` parts. DeepSeek strips images silently. Helper constructors: `imageFromUrl()`, `imageFromBase64()`, `imageFromFile()`. Backwards compatible — text-only messages unchanged. 4 new tests. Total: 331 tests, 617 expect() calls.
 - [x] ~~**Gemini structured output**~~ — ✅ DONE. When Agent uses a Gemini model, the Zod output schema is now converted to Gemini's `responseSchema` in `generationConfig` with `responseMimeType: 'application/json'`. This gives reliable JSON parsing matching OpenAI's JSON mode. Agent response parsing updated to JSON.parse for Gemini (was XML-only). 1 new test. Total: 332 tests, 620 expect() calls.
 - [x] ~~**Gemini streaming**~~ — ✅ DONE. Gemini now uses `:streamGenerateContent?alt=sse` when `streamingCallback` is provided. SSE chunks parsed for text deltas + usage metadata. Previously Gemini silently ignored streaming requests. 2 new tests verifying URL routing and delta delivery. Total: 334 tests, 631 expect() calls.
+- [x] ~~**Request abort + timeout**~~ — ✅ DONE. `callLLM` options now accept `signal` (AbortSignal) and `timeoutMs`. Signal is passed to all fetch calls across all providers. When `timeoutMs` is set, an internal AbortController auto-aborts after the timeout. User signal and timeout signal are composed via `AbortSignal.any()`. Finally block clears timeout on completion. 3 new tests (timeout abort, user signal, signal passthrough). Total: 337 tests, 635 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 334 tests across 14 files, 631 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 337 tests across 14 files, 635 expect() calls.

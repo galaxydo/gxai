@@ -109,363 +109,379 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
 export async function callLLM(
   llm: LLMType | string,
   messages: Array<LLMMessage | { role: string; content: string; cacheControl?: boolean }>,
-  options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
+  options: { temperature?: number; maxTokens?: number; response_format?: any; signal?: AbortSignal; timeoutMs?: number } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,
   progressCallback?: ProgressCallback,
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
   lastTokenUsage = null;
-  const { temperature = 0.7, maxTokens = 4000, response_format } = options;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  let url = "";
-  let body: Record<string, any> = {};
+  const { temperature = 0.7, maxTokens = 4000, response_format, signal: userSignal, timeoutMs } = options;
 
-  if (llm.includes("claude")) {
-    if (!process.env.ANTHROPIC_API_KEY && process.env.NODE_ENV !== "test") throw new Error("ANTHROPIC_API_KEY environment variable is required");
-    headers["x-api-key"] = process.env.ANTHROPIC_API_KEY || "test";
-    headers["anthropic-version"] = "2023-06-01";
-    url = "https://api.anthropic.com/v1/messages";
+  // Build abort signal: combine user signal + timeout
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let fetchSignal: AbortSignal | undefined = userSignal;
+  if (timeoutMs && timeoutMs > 0) {
+    const timeoutController = new AbortController();
+    timeoutId = setTimeout(() => timeoutController.abort(new Error(`LLM request timed out after ${timeoutMs}ms`)), timeoutMs);
+    fetchSignal = userSignal
+      ? AbortSignal.any([userSignal, timeoutController.signal])
+      : timeoutController.signal;
+  }
 
-    const systemMessages = messages.filter(m => m.role === "system");
-    let systemParam: string | any[] | undefined = undefined;
-    if (systemMessages.length === 1 && !systemMessages[0]!.cacheControl) {
-      systemParam = systemMessages[0]!.content;
-    } else if (systemMessages.length > 0) {
-      systemParam = systemMessages.map(m => {
-        const block: any = { type: "text", text: m.content };
-        if (m.cacheControl) block.cache_control = { type: "ephemeral" };
-        return block;
-      });
-    }
+  try {
 
-    const anthropicMessages = messages.filter(m => m.role !== "system").map(m => {
-      const images = (m as LLMMessage).images;
-      if (images && images.length > 0) {
-        // Multimodal: build content array with image + text parts
-        const contentParts: any[] = images.map(img => {
-          if (img.data) {
-            return { type: "image", source: { type: "base64", media_type: img.mimeType || 'image/png', data: img.data } };
-          }
-          // URL — Anthropic requires base64, but supports URL via url source type
-          return { type: "image", source: { type: "url", url: img.url } };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    let url = "";
+    let body: Record<string, any> = {};
+
+    if (llm.includes("claude")) {
+      if (!process.env.ANTHROPIC_API_KEY && process.env.NODE_ENV !== "test") throw new Error("ANTHROPIC_API_KEY environment variable is required");
+      headers["x-api-key"] = process.env.ANTHROPIC_API_KEY || "test";
+      headers["anthropic-version"] = "2023-06-01";
+      url = "https://api.anthropic.com/v1/messages";
+
+      const systemMessages = messages.filter(m => m.role === "system");
+      let systemParam: string | any[] | undefined = undefined;
+      if (systemMessages.length === 1 && !systemMessages[0]!.cacheControl) {
+        systemParam = systemMessages[0]!.content;
+      } else if (systemMessages.length > 0) {
+        systemParam = systemMessages.map(m => {
+          const block: any = { type: "text", text: m.content };
+          if (m.cacheControl) block.cache_control = { type: "ephemeral" };
+          return block;
         });
-        contentParts.push({ type: "text", text: m.content });
-        if (m.cacheControl) {
-          contentParts[contentParts.length - 1].cache_control = { type: "ephemeral" };
+      }
+
+      const anthropicMessages = messages.filter(m => m.role !== "system").map(m => {
+        const images = (m as LLMMessage).images;
+        if (images && images.length > 0) {
+          // Multimodal: build content array with image + text parts
+          const contentParts: any[] = images.map(img => {
+            if (img.data) {
+              return { type: "image", source: { type: "base64", media_type: img.mimeType || 'image/png', data: img.data } };
+            }
+            // URL — Anthropic requires base64, but supports URL via url source type
+            return { type: "image", source: { type: "url", url: img.url } };
+          });
+          contentParts.push({ type: "text", text: m.content });
+          if (m.cacheControl) {
+            contentParts[contentParts.length - 1].cache_control = { type: "ephemeral" };
+          }
+          return { role: m.role, content: contentParts };
         }
-        return { role: m.role, content: contentParts };
-      }
-      if (m.cacheControl) {
-        return {
-          role: m.role,
-          content: [
-            { type: "text", text: m.content, cache_control: { type: "ephemeral" } }
-          ]
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
+        if (m.cacheControl) {
+          return {
+            role: m.role,
+            content: [
+              { type: "text", text: m.content, cache_control: { type: "ephemeral" } }
+            ]
+          };
+        }
+        return { role: m.role, content: m.content };
+      });
 
-    body = {
-      model: llm,
-      max_tokens: maxTokens,
-      messages: anthropicMessages,
-      stream: !!streamingCallback,
-      ...(systemParam !== undefined && { system: systemParam })
-    };
-  } else if (llm.includes("deepseek")) {
-    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
-    headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
-    url = "https://api.deepseek.com/v1/chat/completions";
-    const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
-    // DeepSeek does not support vision — strip images silently
-    body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
-  } else if (llm.includes("gemini")) {
-    // Gemini REST API — self-contained with measure.retry for rate limits
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey && process.env.NODE_ENV !== "test") throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
-    headers["x-goog-api-key"] = apiKey || "test";
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
+      body = {
+        model: llm,
+        max_tokens: maxTokens,
+        messages: anthropicMessages,
+        stream: !!streamingCallback,
+        ...(systemParam !== undefined && { system: systemParam })
+      };
+    } else if (llm.includes("deepseek")) {
+      if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== "test") throw new Error("DEEPSEEK_API_KEY environment variable is required");
+      headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
+      url = "https://api.deepseek.com/v1/chat/completions";
+      const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
+      // DeepSeek does not support vision — strip images silently
+      body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+    } else if (llm.includes("gemini")) {
+      // Gemini REST API — self-contained with measure.retry for rate limits
+      const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+      if (!apiKey && process.env.NODE_ENV !== "test") throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required");
+      headers["x-goog-api-key"] = apiKey || "test";
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:generateContent`;
 
-    // Convert messages to Gemini contents/parts format
-    const systemMsgs = messages.filter(m => m.role === "system");
-    const systemInstruction = systemMsgs.length > 0 ? systemMsgs.map(m => m.content).join("\n\n") : undefined;
-    const nonSystemMsgs = messages.filter(m => m.role !== "system" && m.content?.trim());
+      // Convert messages to Gemini contents/parts format
+      const systemMsgs = messages.filter(m => m.role === "system");
+      const systemInstruction = systemMsgs.length > 0 ? systemMsgs.map(m => m.content).join("\n\n") : undefined;
+      const nonSystemMsgs = messages.filter(m => m.role !== "system" && m.content?.trim());
 
-    // Merge consecutive same-role messages (Gemini rejects them)
-    const contents: Array<{ role: string; parts: any[] }> = [];
-    for (const m of nonSystemMsgs) {
-      const role = m.role === "assistant" ? "model" : "user";
-      const images = (m as LLMMessage).images;
+      // Merge consecutive same-role messages (Gemini rejects them)
+      const contents: Array<{ role: string; parts: any[] }> = [];
+      for (const m of nonSystemMsgs) {
+        const role = m.role === "assistant" ? "model" : "user";
+        const images = (m as LLMMessage).images;
 
-      // Build parts: images first (as inlineData), then text
-      const parts: any[] = [];
-      if (images && images.length > 0) {
-        for (const img of images) {
-          if (img.data) {
-            parts.push({ inlineData: { mimeType: img.mimeType || 'image/png', data: img.data } });
-          } else if (img.url) {
-            // Gemini supports fileData with fileUri for GCS, otherwise use URL as text hint
-            parts.push({ text: `[Image: ${img.url}]` });
+        // Build parts: images first (as inlineData), then text
+        const parts: any[] = [];
+        if (images && images.length > 0) {
+          for (const img of images) {
+            if (img.data) {
+              parts.push({ inlineData: { mimeType: img.mimeType || 'image/png', data: img.data } });
+            } else if (img.url) {
+              // Gemini supports fileData with fileUri for GCS, otherwise use URL as text hint
+              parts.push({ text: `[Image: ${img.url}]` });
+            }
           }
         }
-      }
-      parts.push({ text: m.content });
+        parts.push({ text: m.content });
 
-      const last = contents[contents.length - 1];
-      if (last && last.role === role) {
-        last.parts.push(...parts);
+        const last = contents[contents.length - 1];
+        if (last && last.role === role) {
+          last.parts.push(...parts);
+        } else {
+          contents.push({ role, parts });
+        }
+      }
+
+      const generationConfig: Record<string, any> = { temperature, maxOutputTokens: maxTokens };
+
+      // Gemini structured output: convert OpenAI-style json_schema to Gemini responseSchema
+      if (response_format?.type === 'json_schema' && response_format.json_schema?.schema) {
+        generationConfig.responseMimeType = 'application/json';
+        generationConfig.responseSchema = response_format.json_schema.schema;
+      }
+
+      body = {
+        contents,
+        generationConfig,
+        ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
+      };
+
+      const requestBodyStr = JSON.stringify(body);
+
+      if (streamingCallback) {
+        // Gemini streaming via SSE endpoint
+        const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:streamGenerateContent?alt=sse`;
+        const res = await fetch(streamUrl, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal });
+        if (res.status === 429) throw new Error(`Rate limited (429)`);
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No readable stream from Gemini");
+
+        const decoder = new TextDecoder();
+        let fullResponse = "";
+        let sseBuffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+            try {
+              const chunk = JSON.parse(jsonStr);
+              const text = chunk?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              if (text) {
+                fullResponse += text;
+                streamingCallback({ stage: "streaming", field: "content", value: text });
+              }
+              // Extract usage from last chunk
+              if (chunk?.usageMetadata) {
+                lastTokenUsage = extractUsage(llm, chunk) || null;
+              }
+            } catch { /* skip malformed chunks */ }
+          }
+        }
+
+        return fullResponse;
+      }
+
+      // Non-streaming Gemini
+      return (await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
+        const res = await fetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal });
+
+        if (res.status === 429) {
+          throw new Error(`Rate limited (429) — will retry`);
+        }
+
+        const data = await res.json() as any;
+        const { content: text, rawData } = validateProviderResponse(llm, data);
+        lastTokenUsage = extractUsage(llm, rawData) || null;
+        return text;
+      }))!;
+    } else {
+      if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
+      headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
+      url = "https://api.openai.com/v1/chat/completions";
+      const openaiMessages = messages.map(m => {
+        const images = (m as LLMMessage).images;
+        if (images && images.length > 0) {
+          // Multimodal: content becomes array of parts
+          const contentParts: any[] = images.map(img => {
+            if (img.url) {
+              return { type: "image_url", image_url: { url: img.url } };
+            }
+            // Base64 to data URI
+            const mime = img.mimeType || 'image/png';
+            return { type: "image_url", image_url: { url: `data:${mime};base64,${img.data}` } };
+          });
+          contentParts.push({ type: "text", text: m.content });
+          return { role: m.role, content: contentParts };
+        }
+        return { role: m.role, content: m.content };
+      });
+      if (llm.includes('o4-')) {
+        body = { model: llm, temperature: 1.0, messages: openaiMessages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
       } else {
-        contents.push({ role, parts });
+        body = { model: llm, temperature, messages: openaiMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+      }
+      if (response_format) {
+        body.response_format = response_format;
       }
     }
-
-    const generationConfig: Record<string, any> = { temperature, maxOutputTokens: maxTokens };
-
-    // Gemini structured output: convert OpenAI-style json_schema to Gemini responseSchema
-    if (response_format?.type === 'json_schema' && response_format.json_schema?.schema) {
-      generationConfig.responseMimeType = 'application/json';
-      generationConfig.responseSchema = response_format.json_schema.schema;
-    }
-
-    body = {
-      contents,
-      generationConfig,
-      ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
-    };
 
     const requestBodyStr = JSON.stringify(body);
 
-    if (streamingCallback) {
-      // Gemini streaming via SSE endpoint
-      const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${llm}:streamGenerateContent?alt=sse`;
-      const res = await fetch(streamUrl, { method: "POST", headers, body: requestBodyStr });
-      if (res.status === 429) throw new Error(`Rate limited (429)`);
+    // Use customFetch (for x402 payment flow) or plain fetch
+    const doFetch = customFetch
+      ? (u: string, o: RequestInit, desc: string) => customFetch(u, o, null, desc, progressCallback)
+      : (u: string, o: RequestInit, _desc: string) => fetch(u, o);
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No readable stream from Gemini");
+    if (!streamingCallback) {
+      const content = await measure.assert(`LLM call ${llm}`, async () => {
+        const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} API`);
+        const data = await res.json() as any;
+        const { content, rawData } = validateProviderResponse(llm, data);
+        lastTokenUsage = extractUsage(llm, rawData) || null;
+        return content;
+      });
+      return content ?? '';
+    } else {
+      const response = await doFetch(url, { method: "POST", headers, body: requestBodyStr, signal: fetchSignal }, `HTTP ${llm} streaming`);
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No readable stream available");
+      }
 
       const decoder = new TextDecoder();
       let fullResponse = "";
-      let sseBuffer = "";
+      let buffer = "";
+      let tagStack: string[] = [];
+      let currentTagName = "";
+      let wordBuffer = "";
+      let insideTag = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Track streaming usage across SSE events
+      const streamUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      let hasStreamUsage = false;
 
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split("\n");
-        sseBuffer = lines.pop() || "";
+      const parseSseLine = (line: string): string => {
+        if (!line.startsWith("data: ") || line.includes("[DONE]")) return "";
+        try {
+          const data = JSON.parse(line.slice(6));
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr || jsonStr === "[DONE]") continue;
-          try {
-            const chunk = JSON.parse(jsonStr);
-            const text = chunk?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            if (text) {
-              fullResponse += text;
-              streamingCallback({ stage: "streaming", field: "content", value: text });
+          // Extract usage from streaming chunks
+          if (llm.includes("claude")) {
+            // Anthropic: message_start has input_tokens, message_delta has output_tokens
+            if (data.type === "message_start" && data.message?.usage) {
+              streamUsage.inputTokens = data.message.usage.input_tokens || 0;
+              hasStreamUsage = true;
             }
-            // Extract usage from last chunk
-            if (chunk?.usageMetadata) {
-              lastTokenUsage = extractUsage(llm, chunk) || null;
+            if (data.type === "message_delta" && data.usage) {
+              streamUsage.outputTokens = data.usage.output_tokens || 0;
+              streamUsage.totalTokens = streamUsage.inputTokens + streamUsage.outputTokens;
+              hasStreamUsage = true;
             }
-          } catch { /* skip malformed chunks */ }
+            return data.type === "content_block_delta" && data.delta?.text ? data.delta.text : "";
+          } else {
+            // OpenAI / DeepSeek: usage appears in final chunk when stream_options.include_usage is true
+            if (data.usage) {
+              streamUsage.inputTokens = data.usage.prompt_tokens || 0;
+              streamUsage.outputTokens = data.usage.completion_tokens || 0;
+              streamUsage.totalTokens = data.usage.total_tokens || (streamUsage.inputTokens + streamUsage.outputTokens);
+              hasStreamUsage = true;
+            }
+            return data.choices?.[0]?.delta?.content || "";
+          }
+        } catch (e) {
+          return "";
         }
+      };
+
+      const processChunk = (chunk: string) => {
+        fullResponse += chunk;
+
+        for (const char of chunk) {
+          if (char === "<") {
+            if (wordBuffer && tagStack.length > 0) {
+              streamingCallback?.({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
+            }
+            wordBuffer = "";
+            insideTag = true;
+            currentTagName = "";
+          } else if (char === ">" && insideTag) {
+            insideTag = false;
+            if (currentTagName.startsWith("/")) {
+              tagStack.pop();
+            } else if (currentTagName.trim()) {
+              tagStack.push(currentTagName.trim());
+            }
+            currentTagName = "";
+            wordBuffer = "";
+          } else if (insideTag) {
+            currentTagName += char;
+          } else if (tagStack.length > 0) {
+            const currentField = tagStack.join("_");
+            if (char === " " || char === "\n") {
+              if (wordBuffer) {
+                streamingCallback?.({ stage: "streaming", field: currentField, value: wordBuffer });
+              }
+              streamingCallback?.({ stage: "streaming", field: currentField, value: char });
+              wordBuffer = "";
+            } else {
+              wordBuffer += char;
+            }
+          }
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const content = parseSseLine(line);
+            if (content) processChunk(content);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+        if (buffer) {
+          const content = parseSseLine(buffer);
+          if (content) processChunk(content);
+        }
+        if (wordBuffer && tagStack.length > 0 && streamingCallback) {
+          streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
+        }
+      }
+
+      // Set token usage from streaming
+      if (hasStreamUsage) {
+        lastTokenUsage = streamUsage;
       }
 
       return fullResponse;
     }
-
-    // Non-streaming Gemini
-    return (await measure.retry(`Gemini ${llm}`, { attempts: 4, delay: 5000, backoff: 2 }, async () => {
-      const res = await fetch(url, { method: "POST", headers, body: requestBodyStr });
-
-      if (res.status === 429) {
-        throw new Error(`Rate limited (429) — will retry`);
-      }
-
-      const data = await res.json() as any;
-      const { content: text, rawData } = validateProviderResponse(llm, data);
-      lastTokenUsage = extractUsage(llm, rawData) || null;
-      return text;
-    }))!;
-  } else {
-    if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
-    headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
-    url = "https://api.openai.com/v1/chat/completions";
-    const openaiMessages = messages.map(m => {
-      const images = (m as LLMMessage).images;
-      if (images && images.length > 0) {
-        // Multimodal: content becomes array of parts
-        const contentParts: any[] = images.map(img => {
-          if (img.url) {
-            return { type: "image_url", image_url: { url: img.url } };
-          }
-          // Base64 to data URI
-          const mime = img.mimeType || 'image/png';
-          return { type: "image_url", image_url: { url: `data:${mime};base64,${img.data}` } };
-        });
-        contentParts.push({ type: "text", text: m.content });
-        return { role: m.role, content: contentParts };
-      }
-      return { role: m.role, content: m.content };
-    });
-    if (llm.includes('o4-')) {
-      body = { model: llm, temperature: 1.0, messages: openaiMessages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
-    } else {
-      body = { model: llm, temperature, messages: openaiMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
-    }
-    if (response_format) {
-      body.response_format = response_format;
-    }
-  }
-
-  const requestBodyStr = JSON.stringify(body);
-
-  // Use customFetch (for x402 payment flow) or plain fetch
-  const doFetch = customFetch
-    ? (u: string, o: RequestInit, desc: string) => customFetch(u, o, null, desc, progressCallback)
-    : (u: string, o: RequestInit, _desc: string) => fetch(u, o);
-
-  if (!streamingCallback) {
-    const content = await measure.assert(`LLM call ${llm}`, async () => {
-      const res = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} API`);
-      const data = await res.json() as any;
-      const { content, rawData } = validateProviderResponse(llm, data);
-      lastTokenUsage = extractUsage(llm, rawData) || null;
-      return content;
-    });
-    return content ?? '';
-  } else {
-    const response = await doFetch(url, { method: "POST", headers, body: requestBodyStr }, `HTTP ${llm} streaming`);
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("No readable stream available");
-    }
-
-    const decoder = new TextDecoder();
-    let fullResponse = "";
-    let buffer = "";
-    let tagStack: string[] = [];
-    let currentTagName = "";
-    let wordBuffer = "";
-    let insideTag = false;
-
-    // Track streaming usage across SSE events
-    const streamUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-    let hasStreamUsage = false;
-
-    const parseSseLine = (line: string): string => {
-      if (!line.startsWith("data: ") || line.includes("[DONE]")) return "";
-      try {
-        const data = JSON.parse(line.slice(6));
-
-        // Extract usage from streaming chunks
-        if (llm.includes("claude")) {
-          // Anthropic: message_start has input_tokens, message_delta has output_tokens
-          if (data.type === "message_start" && data.message?.usage) {
-            streamUsage.inputTokens = data.message.usage.input_tokens || 0;
-            hasStreamUsage = true;
-          }
-          if (data.type === "message_delta" && data.usage) {
-            streamUsage.outputTokens = data.usage.output_tokens || 0;
-            streamUsage.totalTokens = streamUsage.inputTokens + streamUsage.outputTokens;
-            hasStreamUsage = true;
-          }
-          return data.type === "content_block_delta" && data.delta?.text ? data.delta.text : "";
-        } else {
-          // OpenAI / DeepSeek: usage appears in final chunk when stream_options.include_usage is true
-          if (data.usage) {
-            streamUsage.inputTokens = data.usage.prompt_tokens || 0;
-            streamUsage.outputTokens = data.usage.completion_tokens || 0;
-            streamUsage.totalTokens = data.usage.total_tokens || (streamUsage.inputTokens + streamUsage.outputTokens);
-            hasStreamUsage = true;
-          }
-          return data.choices?.[0]?.delta?.content || "";
-        }
-      } catch (e) {
-        return "";
-      }
-    };
-
-    const processChunk = (chunk: string) => {
-      fullResponse += chunk;
-
-      for (const char of chunk) {
-        if (char === "<") {
-          if (wordBuffer && tagStack.length > 0) {
-            streamingCallback?.({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
-          }
-          wordBuffer = "";
-          insideTag = true;
-          currentTagName = "";
-        } else if (char === ">" && insideTag) {
-          insideTag = false;
-          if (currentTagName.startsWith("/")) {
-            tagStack.pop();
-          } else if (currentTagName.trim()) {
-            tagStack.push(currentTagName.trim());
-          }
-          currentTagName = "";
-          wordBuffer = "";
-        } else if (insideTag) {
-          currentTagName += char;
-        } else if (tagStack.length > 0) {
-          const currentField = tagStack.join("_");
-          if (char === " " || char === "\n") {
-            if (wordBuffer) {
-              streamingCallback?.({ stage: "streaming", field: currentField, value: wordBuffer });
-            }
-            streamingCallback?.({ stage: "streaming", field: currentField, value: char });
-            wordBuffer = "";
-          } else {
-            wordBuffer += char;
-          }
-        }
-      }
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const content = parseSseLine(line);
-          if (content) processChunk(content);
-        }
-      }
-    } finally {
-      reader.releaseLock();
-      if (buffer) {
-        const content = parseSseLine(buffer);
-        if (content) processChunk(content);
-      }
-      if (wordBuffer && tagStack.length > 0 && streamingCallback) {
-        streamingCallback({ stage: "streaming", field: tagStack.join("_"), value: wordBuffer });
-      }
-    }
-
-    // Set token usage from streaming
-    if (hasStreamUsage) {
-      lastTokenUsage = streamUsage;
-    }
-
-    return fullResponse;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
-
 /** Configuration for provider fallback chain */
 export interface FallbackConfig {
   /** Ordered list of LLM providers to try. First is primary, rest are fallbacks. */
@@ -821,6 +837,72 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(capturedUrl).toContain('generateContent');
       expect(capturedUrl).not.toContain('stream');
       expect(result).toBe('response text');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Abort / Timeout Tests ──
+
+  test('timeoutMs: aborts request after timeout', async () => {
+    const originalFetch = globalThis.fetch;
+    // Signal-aware mock: rejects when aborted
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response('{}')), 10000);
+        if (opts?.signal) {
+          opts.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(opts.signal.reason || new DOMException('Aborted', 'AbortError'));
+          });
+        }
+      });
+    }) as any;
+    try {
+      await expect(
+        callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], { timeoutMs: 50 })
+      ).rejects.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('signal: user-provided AbortSignal cancels request', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response('{}')), 10000);
+        if (opts?.signal) {
+          opts.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        }
+      });
+    }) as any;
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 30);
+      await expect(
+        callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], { signal: controller.signal })
+      ).rejects.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('signal: passed to underlying fetch call', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedSignal = opts.signal;
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+    }) as any;
+    try {
+      const controller = new AbortController();
+      await callLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], { signal: controller.signal });
+      expect(capturedSignal).toBeDefined();
+      expect(capturedSignal).toBe(controller.signal);
     } finally {
       globalThis.fetch = originalFetch;
     }
