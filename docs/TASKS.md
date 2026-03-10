@@ -44,7 +44,7 @@
 
 ## 🟢 Priority: Backlog
 - [x] ~~**Provider health check before routing**~~ — ✅ DONE. `pingProvider(llm)` HEAD-requests provider endpoints (5s timeout). Returns `{ ok, latencyMs, error? }`. 60s TTL health cache. `callLLMWithFallback` now accepts `skipUnhealthy: true` to pre-ping and skip dead providers. `getProviderEndpoint()`, `clearHealthCache()` exported. 5 new tests. Total: 359 tests, 698 expect() calls.
-- [ ] **Remove deprecated positional params (v3)** — After downstream consumers migrate to `options.streaming` / `options.progress` / `options.customFetch`, remove the legacy positional params from `callLLM`, `callLLMWithFallback`, and `cachedCallLLM`. Semver major bump.
+- [x] ~~**Remove deprecated positional params (v3)**~~ — ✅ DONE (v3.0.0). Removed `_measureFn`, `streamingCallback`, `progressCallback`, `customFetch` positional params from `callLLM`, `callLLMWithFallback`, and `cachedCallLLM`. All callers must use `options.streaming`, `options.progress`, `options.customFetch`. All 6 old-API test callsites migrated. 359 tests, 698 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).

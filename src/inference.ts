@@ -229,26 +229,15 @@ export async function callLLM(
   options: {
     temperature?: number; maxTokens?: number; response_format?: any;
     signal?: AbortSignal; timeoutMs?: number;
-    /** Streaming callback — replaces the old positional `streamingCallback` param */
+    /** Streaming callback */
     streaming?: StreamingCallback;
-    /** Progress callback — replaces the old positional `progressCallback` param */
+    /** Progress callback */
     progress?: ProgressCallback;
-    /** Custom fetch — replaces the old positional `customFetch` param (e.g. for x402 payments) */
+    /** Custom fetch (e.g. for x402 payments) */
     customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>;
   } = {},
-  /** @deprecated Use `options.streaming` instead */
-  _measureFn?: any,
-  /** @deprecated Use `options.streaming` instead */
-  streamingCallback?: StreamingCallback,
-  /** @deprecated Use `options.progress` instead */
-  progressCallback?: ProgressCallback,
-  /** @deprecated Use `options.customFetch` instead */
-  customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
-  // Options-object fields take precedence over positional params
-  streamingCallback = options.streaming ?? streamingCallback;
-  progressCallback = options.progress ?? progressCallback;
-  customFetch = options.customFetch ?? customFetch;
+  const { streaming: streamingCallback, progress: progressCallback, customFetch } = options;
 
   lastTokenUsage = null;
   const { temperature = 0.7, maxTokens = 4000, response_format, signal: userSignal, timeoutMs } = options;
@@ -727,22 +716,9 @@ export async function callLLMWithFallback(
     /** Pre-ping providers and skip unreachable ones */
     skipUnhealthy?: boolean;
   } = {},
-  /** @deprecated Use `options.streaming` instead */
-  _measureFn?: any,
-  /** @deprecated Use `options.streaming` instead */
-  streamingCallback?: StreamingCallback,
-  /** @deprecated Use `options.progress` instead */
-  progressCallback?: ProgressCallback,
-  /** @deprecated Use `options.customFetch` instead */
-  customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
   let { providers, onFallback } = fallback;
   if (!providers.length) throw new Error('FallbackConfig requires at least one provider');
-
-  // Merge options-object fields over positional params
-  const resolvedStreaming = options.streaming ?? streamingCallback;
-  const resolvedProgress = options.progress ?? progressCallback;
-  const resolvedCustomFetch = options.customFetch ?? customFetch;
 
   // ── Pre-flight health check ──
   if (options.skipUnhealthy && providers.length > 1) {
@@ -771,12 +747,7 @@ export async function callLLMWithFallback(
   for (let i = 0; i < providers.length; i++) {
     const provider = providers[i]!;
     try {
-      return await callLLM(provider, messages, {
-        ...options,
-        streaming: resolvedStreaming,
-        progress: resolvedProgress,
-        customFetch: resolvedCustomFetch,
-      });
+      return await callLLM(provider, messages, options);
     } catch (err: any) {
       lastError = err;
       const errMsg = err.message || String(err);
@@ -825,9 +796,7 @@ if (import.meta.env.NODE_ENV === "test") {
       const result = await callLLM(
         'gpt-4o-mini',
         [{ role: 'user', content: 'hello' }],
-        {},
-        null,
-        (update) => streamingUpdates.push(update)
+        { streaming: (update: StreamingUpdate) => streamingUpdates.push(update) },
       );
       expect(result).toContain('hello world');
       expect(streamingUpdates.length).toBeGreaterThan(0);
@@ -855,7 +824,7 @@ if (import.meta.env.NODE_ENV === "test") {
       const result = await callLLM(
         'gpt-4o-mini',
         [{ role: 'user', content: 'test' }],
-        { streaming: (update) => updates.push(update) },
+        { streaming: (update: StreamingUpdate) => updates.push(update) },
       );
       expect(result).toContain('ok');
       expect(updates.length).toBeGreaterThan(0);
@@ -1092,8 +1061,8 @@ if (import.meta.env.NODE_ENV === "test") {
     }) as any;
     try {
       const updates: any[] = [];
-      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'hi' }], {}, null,
-        (update) => updates.push(update));
+      const result = await callLLM('gemini-2.0-flash', [{ role: 'user', content: 'hi' }],
+        { streaming: (update: StreamingUpdate) => updates.push(update) });
 
       // Should use streamGenerateContent endpoint
       expect(capturedUrl).toContain('streamGenerateContent');
@@ -1378,12 +1347,11 @@ if (import.meta.env.NODE_ENV === "test") {
     globalThis.fetch = (async () => new Response(stream)) as any;
     try {
       const reasoningChunks: string[] = [];
-      const result = await callLLM('deepseek-reasoner', [{ role: 'user', content: 'test' }], {},
-        undefined,
-        (update) => {
+      const result = await callLLM('deepseek-reasoner', [{ role: 'user', content: 'test' }], {
+        streaming: (update: StreamingUpdate) => {
           if (update.field === '_reasoning') reasoningChunks.push(update.value);
-        }
-      );
+        },
+      });
       expect(result).toContain('Answer: 4');
       expect(reasoningChunks.length).toBe(2);
       expect(reasoningChunks[0]).toBe('Let me think...');
@@ -1457,13 +1425,12 @@ if (import.meta.env.NODE_ENV === "test") {
     try {
       const reasoningChunks: string[] = [];
       const contentChunks: string[] = [];
-      const result = await callLLM('gemini-2.5-pro-preview-05-06', [{ role: 'user', content: 'test' }], {},
-        undefined,
-        (update) => {
+      const result = await callLLM('gemini-2.5-pro-preview-05-06', [{ role: 'user', content: 'test' }], {
+        streaming: (update: StreamingUpdate) => {
           if (update.field === '_reasoning') reasoningChunks.push(update.value);
           if (update.field === 'content') contentChunks.push(update.value);
-        }
-      );
+        },
+      });
       expect(reasoningChunks).toEqual(['thinking...']);
       expect(contentChunks).toEqual(['The answer', ' is 42']);
       expect(result).toBe('The answer is 42');
@@ -1536,12 +1503,11 @@ if (import.meta.env.NODE_ENV === "test") {
     try {
       const reasoningChunks: string[] = [];
       const contentChunks: string[] = [];
-      const result = await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'test' }], {},
-        undefined,
-        (update) => {
+      const result = await callLLM('claude-sonnet-4-20250514', [{ role: 'user', content: 'test' }], {
+        streaming: (update: StreamingUpdate) => {
           if (update.field === '_reasoning') reasoningChunks.push(update.value);
-        }
-      );
+        },
+      });
       expect(reasoningChunks).toEqual(['step by step...']);
       // The text content goes through the XML tag parser, verify via result string
       expect(result).toContain('The answer');
