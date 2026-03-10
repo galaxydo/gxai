@@ -7,14 +7,14 @@ import { extname } from "path";
 export const LLM = {
   "gpt-4o-mini": "gpt-4o-mini",
   gpt4o: "gpt-4o",
-  gpt4: "gpt-4",
-  claude: "claude-3-sonnet-20240229",
-  claude35Sonnet: "claude-3-5-sonnet-20240620",
-  claude35SonnetLatest: "claude-3-5-sonnet-20241022",
+  "o4-mini": "o4-mini",
+  claude: "claude-sonnet-4-20250514",
+  claudeSonnet: "claude-sonnet-4-20250514",
+  claudeHaiku: "claude-3-5-haiku-20241022",
   deepseek: "deepseek-chat",
   "gemini-2.0-flash": "gemini-2.0-flash",
+  "gemini-2.5-flash": "gemini-2.5-flash-preview-05-20",
   "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",
-  "gemini-3-flash-preview": "gemini-2.0-flash",
 } as const;
 
 export type LLMType = typeof LLM[keyof typeof LLM];

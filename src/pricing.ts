@@ -28,11 +28,11 @@ const PRICING_TABLE: Array<{ match: string; pricing: ModelPricing }> = [
     { match: 'gpt-4o-mini', pricing: { inputPerMillion: 0.15, outputPerMillion: 0.60 } },
     { match: 'o4-mini', pricing: { inputPerMillion: 1.10, outputPerMillion: 4.40 } },
     { match: 'gpt-4o', pricing: { inputPerMillion: 2.50, outputPerMillion: 10.00 } },
-    { match: 'gpt-4', pricing: { inputPerMillion: 30.00, outputPerMillion: 60.00 } },
 
     // Anthropic
+    { match: 'claude-sonnet-4', pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 } },
+    { match: 'claude-3-5-haiku', pricing: { inputPerMillion: 0.80, outputPerMillion: 4.00 } },
     { match: 'claude-3-5-sonnet', pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 } },
-    { match: 'claude-3-sonnet', pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 } },
     { match: 'claude', pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 } },
 
     // DeepSeek
@@ -40,6 +40,7 @@ const PRICING_TABLE: Array<{ match: string; pricing: ModelPricing }> = [
 
     // Gemini
     { match: 'gemini-2.5-pro', pricing: { inputPerMillion: 1.25, outputPerMillion: 10.00 } },
+    { match: 'gemini-2.5-flash', pricing: { inputPerMillion: 0.15, outputPerMillion: 0.60 } },
     { match: 'gemini-2.0-flash', pricing: { inputPerMillion: 0.10, outputPerMillion: 0.40 } },
     { match: 'gemini', pricing: { inputPerMillion: 0.10, outputPerMillion: 0.40 } },
 ];

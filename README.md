@@ -486,7 +486,7 @@ View queued analytics: `bun run analytics` or `gx --analytics`
 ## Testing
 
 ```bash
-bun test   # 341 tests, 0 failures, 645 expect() calls
+bun test   # 341 tests, 0 failures, 648 expect() calls
 ```
 
 ## Full Export List

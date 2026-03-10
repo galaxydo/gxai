@@ -143,7 +143,7 @@ describe('UAI Library Tests', () => {
   });
 
   it('should support all LLM model configurations', () => {
-    const models = [LLM.gpt4o, LLM.gpt4, LLM.claude, LLM.deepseek];
+    const models = [LLM.gpt4o, LLM["o4-mini"], LLM.claude, LLM.claudeSonnet, LLM.claudeHaiku, LLM.deepseek, LLM["gemini-2.0-flash"]];
 
     for (const model of models) {
       const agent = new Agent({
