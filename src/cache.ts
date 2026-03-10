@@ -119,3 +119,102 @@ export function clearCache(): void {
 export function getCacheStats(): { size: number; keys: string[] } {
     return { size: cache.size, keys: [...cache.keys()] };
 }
+
+if (import.meta.env.NODE_ENV === "test") {
+    const { test, expect, beforeEach } = await import('bun:test');
+
+    beforeEach(() => clearCache());
+
+    test('cachedCallLLM returns cached result on second call', async () => {
+        let fetchCount = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => {
+            fetchCount++;
+            return new Response(JSON.stringify({ choices: [{ message: { content: 'cached response' } }] }));
+        }) as any;
+        try {
+            const msgs = [{ role: 'user' as const, content: 'hello' }];
+            const r1 = await cachedCallLLM('gpt-4o-mini', msgs, { temperature: 0 });
+            const r2 = await cachedCallLLM('gpt-4o-mini', msgs, { temperature: 0 });
+            expect(r1).toBe('cached response');
+            expect(r2).toBe('cached response');
+            expect(fetchCount).toBe(1); // Only 1 fetch — second was cache hit
+            expect(getCacheSize()).toBe(1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('cachedCallLLM streaming bypasses cache', async () => {
+        let fetchCount = 0;
+        const originalFetch = globalThis.fetch;
+        const mockStream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "hi"}}]}\n\n'));
+                controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+                controller.close();
+            }
+        });
+        globalThis.fetch = (async () => {
+            fetchCount++;
+            return new Response(mockStream);
+        }) as any;
+        try {
+            await cachedCallLLM('gpt-4o-mini', [{ role: 'user', content: 'hi' }], {},
+                {}, null, (update) => { });
+            expect(getCacheSize()).toBe(0); // Streaming not cached
+            expect(fetchCount).toBe(1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('clearCache empties the cache', async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () =>
+            new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }] }))
+        ) as any;
+        try {
+            await cachedCallLLM('gpt-4o-mini', [{ role: 'user', content: 'a' }], {});
+            expect(getCacheSize()).toBe(1);
+            clearCache();
+            expect(getCacheSize()).toBe(0);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('expired entries are re-fetched', async () => {
+        let fetchCount = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => {
+            fetchCount++;
+            return new Response(JSON.stringify({ choices: [{ message: { content: `call-${fetchCount}` } }] }));
+        }) as any;
+        try {
+            const msgs = [{ role: 'user' as const, content: 'test' }];
+            await cachedCallLLM('gpt-4o-mini', msgs, {}, { ttlMs: 1 }); // 1ms TTL
+            await new Promise(r => setTimeout(r, 10)); // Wait for expiry
+            const r2 = await cachedCallLLM('gpt-4o-mini', msgs, {}, { ttlMs: 1 });
+            expect(fetchCount).toBe(2); // Both calls hit the API
+            expect(r2).toBe('call-2');
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('different inputs produce different cache entries', async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: string, opts: any) => {
+            const body = JSON.parse(opts.body);
+            return new Response(JSON.stringify({ choices: [{ message: { content: body.messages[0].content } }] }));
+        }) as any;
+        try {
+            await cachedCallLLM('gpt-4o-mini', [{ role: 'user', content: 'A' }], {});
+            await cachedCallLLM('gpt-4o-mini', [{ role: 'user', content: 'B' }], {});
+            expect(getCacheSize()).toBe(2);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+}
