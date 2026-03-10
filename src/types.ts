@@ -12,6 +12,7 @@ export const LLM = {
   claudeSonnet: "claude-sonnet-4-20250514",
   claudeHaiku: "claude-3-5-haiku-20241022",
   deepseek: "deepseek-chat",
+  deepseekR1: "deepseek-reasoner",
   "gemini-2.0-flash": "gemini-2.0-flash",
   "gemini-2.5-flash": "gemini-2.5-flash-preview-05-20",
   "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",
@@ -95,6 +96,8 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Chain-of-thought reasoning (DeepSeek R1 models) */
+  reasoningContent?: string;
 }
 
 export interface LLMResult {

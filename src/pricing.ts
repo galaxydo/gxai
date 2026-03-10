@@ -36,6 +36,7 @@ const PRICING_TABLE: Array<{ match: string; pricing: ModelPricing }> = [
     { match: 'claude', pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 } },
 
     // DeepSeek
+    { match: 'deepseek-reasoner', pricing: { inputPerMillion: 0.55, outputPerMillion: 2.19 } },
     { match: 'deepseek', pricing: { inputPerMillion: 0.14, outputPerMillion: 0.28 } },
 
     // Gemini

@@ -89,11 +89,15 @@ export let lastTokenUsage: TokenUsage | null = null;
 function extractUsage(llm: string, data: any): TokenUsage | undefined {
   // OpenAI / DeepSeek format
   if (data?.usage?.prompt_tokens !== undefined) {
-    return {
+    const usage: TokenUsage = {
       inputTokens: data.usage.prompt_tokens,
       outputTokens: data.usage.completion_tokens || 0,
       totalTokens: data.usage.total_tokens || (data.usage.prompt_tokens + (data.usage.completion_tokens || 0)),
     };
+    // DeepSeek R1: capture reasoning_content from the response
+    const reasoning = data?.choices?.[0]?.message?.reasoning_content;
+    if (reasoning) usage.reasoningContent = reasoning;
+    return usage;
   }
   // Anthropic format
   if (data?.usage?.input_tokens !== undefined) {
@@ -434,6 +438,11 @@ export async function callLLM(
               streamUsage.outputTokens = data.usage.completion_tokens || 0;
               streamUsage.totalTokens = data.usage.total_tokens || (streamUsage.inputTokens + streamUsage.outputTokens);
               hasStreamUsage = true;
+            }
+            // DeepSeek R1: emit reasoning_content as separate streaming field
+            const reasoning = data.choices?.[0]?.delta?.reasoning_content;
+            if (reasoning && streamingCallback) {
+              streamingCallback({ stage: "streaming", field: "_reasoning", value: reasoning });
             }
             return data.choices?.[0]?.delta?.content || "";
           }
@@ -1025,5 +1034,60 @@ if (import.meta.env.NODE_ENV === "test") {
     const toolBlock = parsed.content.find(b => b.type === 'tool_use' && b.input);
     expect(toolBlock).toBeDefined();
     expect(JSON.stringify(toolBlock!.input)).toBe('{"key":"value","num":42}');
+  });
+
+  // ── DeepSeek R1 Reasoning Tests ──
+
+  test('DeepSeek R1: reasoning_content captured in lastTokenUsage', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({
+        choices: [{ message: { content: 'The answer is 4', reasoning_content: 'Step 1: 2+2=4. Step 2: verify.' } }],
+        usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
+      }))
+    ) as any;
+    try {
+      const result = await callLLM('deepseek-reasoner', [{ role: 'user', content: 'What is 2+2?' }]);
+      expect(result).toBe('The answer is 4');
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.reasoningContent).toBe('Step 1: 2+2=4. Step 2: verify.');
+      expect(lastTokenUsage!.totalTokens).toBe(70);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('DeepSeek R1 streaming: emits reasoning_content as _reasoning field', async () => {
+    const sseData = [
+      'data: {"choices":[{"delta":{"reasoning_content":"Let me think..."}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"Answer: 4"}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":" step 2"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseData) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      }
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(stream)) as any;
+    try {
+      const reasoningChunks: string[] = [];
+      const result = await callLLM('deepseek-reasoner', [{ role: 'user', content: 'test' }], {},
+        undefined,
+        (update) => {
+          if (update.field === '_reasoning') reasoningChunks.push(update.value);
+        }
+      );
+      expect(result).toContain('Answer: 4');
+      expect(reasoningChunks.length).toBe(2);
+      expect(reasoningChunks[0]).toBe('Let me think...');
+      expect(reasoningChunks[1]).toBe(' step 2');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 }
