@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.17.0] — 2026-03-10
+
+### ⚡ Improvements
+
+- **Options-object API for `callLLM`** — `streaming`, `progress`, and `customFetch` can now be passed as fields on the options object instead of positional params. Eliminates the `callLLM(model, msgs, opts, null, undefined, cb, fetch)` pattern. Old positional params still work (backwards compatible, marked `@deprecated`). All internal call sites migrated.
+- **Streaming token usage fallback** — Both Gemini and OpenAI/Claude streaming paths now estimate token usage via character-count heuristic (~4 chars/token) when providers omit usage metadata from SSE chunks. Prevents silent null `lastTokenUsage` that broke cost tracking.
+
+### 🔧 Fixes
+
+- **`callLLMWithFallback` signal/timeout** — Options type now includes `signal` and `timeoutMs`, matching `callLLM`. Previously these were silently dropped through the fallback chain.
+
+### 📊 Tests
+
+- 354 tests, 684 expect() calls across 14 files (up from 349/670).
+
+---
+
 ## [2.0.0] — 2026-03-09
 
 ### ⚡ New Features
