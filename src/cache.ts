@@ -63,18 +63,31 @@ function evict(maxEntries: number) {
 export async function cachedCallLLM(
     llm: LLMType | string,
     messages: Array<{ role: string; content: string }>,
-    options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
+    options: {
+        temperature?: number; maxTokens?: number; response_format?: any;
+        streaming?: StreamingCallback; progress?: ProgressCallback;
+        customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>;
+    } = {},
     cacheConfig: CacheConfig = {},
+    /** @deprecated Use `options.streaming` instead */
     _measureFn?: any,
+    /** @deprecated Use `options.streaming` instead */
     streamingCallback?: StreamingCallback,
+    /** @deprecated Use `options.progress` instead */
     progressCallback?: ProgressCallback,
+    /** @deprecated Use `options.customFetch` instead */
     customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
     const { ttlMs = 300_000, maxEntries = 100 } = cacheConfig;
 
+    // Merge options-object fields over positional params
+    const resolvedStreaming = options.streaming ?? streamingCallback;
+    const resolvedProgress = options.progress ?? progressCallback;
+    const resolvedCustomFetch = options.customFetch ?? customFetch;
+
     // Don't cache streaming calls
-    if (streamingCallback) {
-        return callLLM(llm, messages, options, _measureFn, streamingCallback, progressCallback, customFetch);
+    if (resolvedStreaming) {
+        return callLLM(llm, messages, { ...options, streaming: resolvedStreaming, progress: resolvedProgress, customFetch: resolvedCustomFetch });
     }
 
     const key = cacheKey(llm, messages, options);
@@ -91,7 +104,7 @@ export async function cachedCallLLM(
     }
 
     // Cache miss — call LLM
-    const response = await callLLM(llm, messages, options, _measureFn, undefined, progressCallback, customFetch);
+    const response = await callLLM(llm, messages, { ...options, progress: resolvedProgress, customFetch: resolvedCustomFetch });
 
     // Store in cache
     cache.set(key, {

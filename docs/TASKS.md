@@ -39,7 +39,7 @@
 - [x] ~~**callLLMWithFallback signal/timeout**~~ — ✅ DONE. Options type now includes `signal` and `timeoutMs` matching `callLLM`. 2 new tests (fallback chain + signal forwarding). Total: 351 tests, 673 expect() calls.
 
 ## 🟡 Priority: Improve (Backlog)
-- [ ] **Options-object API for callLLM** — Current signature has 7 positional params (llm, messages, options, _measureFn, streamingCallback, progressCallback, customFetch). Refactor to `callLLM(llm, messages, { ...options, streaming?, progress?, customFetch? })`. Breaking change for v3.
+- [x] ~~**Options-object API for callLLM**~~ — ✅ DONE. `callLLM`, `callLLMWithFallback`, and `cachedCallLLM` now accept `streaming`, `progress`, and `customFetch` on the options object. Old positional params still work (backwards compatible, marked `@deprecated`). All 15+ internal call sites in `agent.ts`, `cache.ts`, and `chat.ts` migrated. 1 new test. Total: 352 tests, 675 expect() calls.
 - [ ] **Provider health check before routing** — Add `pingProvider(llm)` that HEAD-requests the provider's API endpoint. `callLLMWithFallback` could skip providers that are known-down instead of wasting time on failed requests.
 - [ ] **Streaming usage for Gemini** — Currently Gemini streaming only captures usage from the last SSE chunk's `usageMetadata`. Some Gemini models don't include it. Add fallback estimation from character count.
 
@@ -48,4 +48,4 @@
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 351 tests across 14 files, 673 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 352 tests across 14 files, 675 expect() calls.

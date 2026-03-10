@@ -144,12 +144,30 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
 export async function callLLM(
   llm: LLMType | string,
   messages: Array<LLMMessage | { role: string; content: string; cacheControl?: boolean }>,
-  options: { temperature?: number; maxTokens?: number; response_format?: any; signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    temperature?: number; maxTokens?: number; response_format?: any;
+    signal?: AbortSignal; timeoutMs?: number;
+    /** Streaming callback — replaces the old positional `streamingCallback` param */
+    streaming?: StreamingCallback;
+    /** Progress callback — replaces the old positional `progressCallback` param */
+    progress?: ProgressCallback;
+    /** Custom fetch — replaces the old positional `customFetch` param (e.g. for x402 payments) */
+    customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>;
+  } = {},
+  /** @deprecated Use `options.streaming` instead */
   _measureFn?: any,
+  /** @deprecated Use `options.streaming` instead */
   streamingCallback?: StreamingCallback,
+  /** @deprecated Use `options.progress` instead */
   progressCallback?: ProgressCallback,
+  /** @deprecated Use `options.customFetch` instead */
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
+  // Options-object fields take precedence over positional params
+  streamingCallback = options.streaming ?? streamingCallback;
+  progressCallback = options.progress ?? progressCallback;
+  customFetch = options.customFetch ?? customFetch;
+
   lastTokenUsage = null;
   const { temperature = 0.7, maxTokens = 4000, response_format, signal: userSignal, timeoutMs } = options;
 
@@ -595,21 +613,41 @@ export interface FallbackConfig {
 export async function callLLMWithFallback(
   fallback: FallbackConfig,
   messages: Array<{ role: string; content: string; cacheControl?: boolean }>,
-  options: { temperature?: number; maxTokens?: number; response_format?: any; signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    temperature?: number; maxTokens?: number; response_format?: any;
+    signal?: AbortSignal; timeoutMs?: number;
+    streaming?: StreamingCallback;
+    progress?: ProgressCallback;
+    customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>;
+  } = {},
+  /** @deprecated Use `options.streaming` instead */
   _measureFn?: any,
+  /** @deprecated Use `options.streaming` instead */
   streamingCallback?: StreamingCallback,
+  /** @deprecated Use `options.progress` instead */
   progressCallback?: ProgressCallback,
+  /** @deprecated Use `options.customFetch` instead */
   customFetch?: (url: string, options: RequestInit, measure: any, description: string, progressCallback?: ProgressCallback) => Promise<Response>
 ): Promise<string> {
   const { providers, onFallback } = fallback;
   if (!providers.length) throw new Error('FallbackConfig requires at least one provider');
+
+  // Merge options-object fields over positional params
+  const resolvedStreaming = options.streaming ?? streamingCallback;
+  const resolvedProgress = options.progress ?? progressCallback;
+  const resolvedCustomFetch = options.customFetch ?? customFetch;
 
   let lastError: Error | null = null;
 
   for (let i = 0; i < providers.length; i++) {
     const provider = providers[i]!;
     try {
-      return await callLLM(provider, messages, options, _measureFn, streamingCallback, progressCallback, customFetch);
+      return await callLLM(provider, messages, {
+        ...options,
+        streaming: resolvedStreaming,
+        progress: resolvedProgress,
+        customFetch: resolvedCustomFetch,
+      });
     } catch (err: any) {
       lastError = err;
       const errMsg = err.message || String(err);
@@ -665,6 +703,33 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(result).toContain('hello world');
       expect(streamingUpdates.length).toBeGreaterThan(0);
       expect(streamingUpdates[0]!.field).toBe('response');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('callLLM options.streaming works (new API)', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "<r>"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "ok"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices": [{"delta": {"content": "</r>"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      }
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(mockStream)) as any;
+    try {
+      const updates: StreamingUpdate[] = [];
+      // Use options.streaming instead of positional param
+      const result = await callLLM(
+        'gpt-4o-mini',
+        [{ role: 'user', content: 'test' }],
+        { streaming: (update) => updates.push(update) },
+      );
+      expect(result).toContain('ok');
+      expect(updates.length).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -147,9 +147,9 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
     progressCallback?: ProgressCallback,
   ): Promise<string> {
     if (this.config.cacheConfig) {
-      return cachedCallLLM(this.config.llm, messages, options, this.config.cacheConfig, undefined, undefined, progressCallback);
+      return cachedCallLLM(this.config.llm, messages, { ...options, progress: progressCallback }, this.config.cacheConfig);
     }
-    return callLLM(this.config.llm, messages, options, undefined, undefined, progressCallback);
+    return callLLM(this.config.llm, messages, { ...options, progress: progressCallback });
   }
 
   /** Run all registered middleware for a given phase */
@@ -718,11 +718,11 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
           { role: "system", content: systemPrompt },
           { role: "user", content: `<request>${userPrompt}</request>` },
         ],
-        { temperature: 0.3 },
-        null,
-        undefined,
-        progressCallback,
-        (url, options, _m, desc, pcb) => fetchWithPayment(url, options, desc, pcb, this.config.solanaWallet)
+        {
+          temperature: 0.3,
+          progress: progressCallback,
+          customFetch: (url, options, _m, desc, pcb) => fetchWithPayment(url, options, desc, pcb, this.config.solanaWallet),
+        },
       );
 
       if (!response) continue;
@@ -768,11 +768,10 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       const response = await callLLM(
         this.config.llm,
         [{ role: "system", content: systemPrompt }, { role: "user", content: `<request>${userPrompt}</request>` }],
-        { temperature: 0.3 },
-        null,
-        undefined,
-        undefined,
-        (url, options, _m, desc) => fetchWithPayment(url, options, desc)
+        {
+          temperature: 0.3,
+          customFetch: (url, options, _m, desc) => fetchWithPayment(url, options, desc),
+        },
       );
 
       if (!response) return activeServers;
@@ -841,11 +840,10 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       const response = await callLLM(
         this.config.llm,
         [{ role: "system", content: systemPrompt }, { role: "user", content: `<request>${userPrompt}</request>` }],
-        { temperature: 0.3 },
-        null,
-        undefined,
-        undefined,
-        (url, options, _m, desc) => fetchWithPayment(url, options, desc)
+        {
+          temperature: 0.3,
+          customFetch: (url, options, _m, desc) => fetchWithPayment(url, options, desc),
+        },
       );
 
       if (!response) return {};
@@ -930,11 +928,14 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       callLLM(
         this.config.llm,
         messages,
-        { temperature: this.config.temperature || 0.7, maxTokens: this.config.maxTokens || 4000, response_format: responseFormat },
-        null,
-        streamingCallback,
-        progressCallback,
-        (url, options, _m, desc, pcb) => fetchWithPayment(url, options, desc, pcb, this.config.solanaWallet)
+        {
+          temperature: this.config.temperature || 0.7,
+          maxTokens: this.config.maxTokens || 4000,
+          response_format: responseFormat,
+          streaming: streamingCallback,
+          progress: progressCallback,
+          customFetch: (url, options, _m, desc, pcb) => fetchWithPayment(url, options, desc, pcb, this.config.solanaWallet),
+        },
       )
     );
 

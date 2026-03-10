@@ -158,7 +158,7 @@ ${COLORS.bold}Commands:${COLORS.reset}
                 }
             };
 
-            const result = await callLLM(currentModel, allMessages, {}, undefined, streamingCallback);
+            const result = await callLLM(currentModel, allMessages, { streaming: streamingCallback });
 
             // If no streaming happened (non-streaming path), print result
             if (!hasReasoning && result && !process.stdout.writableLength) {
