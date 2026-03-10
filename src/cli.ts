@@ -6,11 +6,13 @@ import { handleServe } from "./commands/serve";
 import { handleAnalytics } from "./commands/viewer";
 import { handleHealth } from "./commands/health";
 import { handleVersion } from "./commands/version";
+import { handleChat } from "./commands/chat";
 
 const HELP = `
 🧠 GXAI - AI Agent Framework (gx402)
 
 Usage:
+  gx --chat              Interactive LLM chat REPL
   gx --serve             Start analytics dashboard
   gx --analytics         View local analytics queue
   gx --health            Run environment health check
@@ -18,6 +20,8 @@ Usage:
   gx --help              Show this help message
 
 Options:
+  --chat                 Start interactive chat
+  --model <name>         Model for chat (gpt, claude, r1, gemini, etc.)
   --serve                Start the analytics web dashboard
   --port <number>        Port for web dashboard (default: 3002)
   --analytics            View local offline analytics
@@ -27,12 +31,11 @@ Options:
   --help, -h             Show help message
 
 Examples:
+  gx --chat
+  gx --chat --model claude
+  gx --chat --model r1
   gx --serve
-  gx --serve --port 4000
-  gx --analytics
-  gx --analytics --clear
   gx --health
-  gx --version
 
 For programmatic usage, import from 'gx402':
   import { Agent, LLM } from 'gx402';
@@ -41,6 +44,8 @@ For programmatic usage, import from 'gx402':
 async function main() {
   const { values } = parseArgs({
     options: {
+      chat: { type: 'boolean' },
+      model: { type: 'string' },
       serve: { type: 'boolean' },
       port: { type: 'string' },
       analytics: { type: 'boolean' },
@@ -64,6 +69,11 @@ async function main() {
 
   if (values.health) {
     await handleHealth();
+    return;
+  }
+
+  if (values.chat) {
+    await handleChat(values.model);
     return;
   }
 
