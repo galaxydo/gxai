@@ -176,7 +176,7 @@ ${COLORS.bold}Commands:${COLORS.reset}
             }
         } catch (err: any) {
             process.stdout.write(`${COLORS.reset}\n`);
-            console.error(`${COLORS.yellow}Error: ${err.message}${COLORS.reset}`);
+            console.log(`${COLORS.yellow}⚠ Error: ${err.message}${COLORS.reset}`);
         }
 
         console.log();
