@@ -1,7 +1,7 @@
 // src/inference.ts
 import { measure } from "measure-fn";
 import { z } from 'zod';
-import type { LLMType, ProgressCallback, StreamingCallback, StreamingUpdate, TokenUsage } from './types';
+import type { LLMType, LLMMessage, ImageContent, ProgressCallback, StreamingCallback, StreamingUpdate, TokenUsage } from './types';
 
 // ─── Provider Response Schemas ──────────────────────────
 // Zod schemas for validating raw LLM API responses.
@@ -108,7 +108,7 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
 
 export async function callLLM(
   llm: LLMType | string,
-  messages: Array<{ role: string; content: string; cacheControl?: boolean }>,
+  messages: Array<LLMMessage | { role: string; content: string; cacheControl?: boolean }>,
   options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,
@@ -142,6 +142,22 @@ export async function callLLM(
     }
 
     const anthropicMessages = messages.filter(m => m.role !== "system").map(m => {
+      const images = (m as LLMMessage).images;
+      if (images && images.length > 0) {
+        // Multimodal: build content array with image + text parts
+        const contentParts: any[] = images.map(img => {
+          if (img.data) {
+            return { type: "image", source: { type: "base64", media_type: img.mimeType || 'image/png', data: img.data } };
+          }
+          // URL — Anthropic requires base64, but supports URL via url source type
+          return { type: "image", source: { type: "url", url: img.url } };
+        });
+        contentParts.push({ type: "text", text: m.content });
+        if (m.cacheControl) {
+          contentParts[contentParts.length - 1].cache_control = { type: "ephemeral" };
+        }
+        return { role: m.role, content: contentParts };
+      }
       if (m.cacheControl) {
         return {
           role: m.role,
@@ -165,6 +181,7 @@ export async function callLLM(
     headers["Authorization"] = `Bearer ${process.env.DEEPSEEK_API_KEY || "test"}`;
     url = "https://api.deepseek.com/v1/chat/completions";
     const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
+    // DeepSeek does not support vision — strip images silently
     body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
   } else if (llm.includes("gemini")) {
     // Gemini REST API — self-contained with measure.retry for rate limits
@@ -179,14 +196,30 @@ export async function callLLM(
     const nonSystemMsgs = messages.filter(m => m.role !== "system" && m.content?.trim());
 
     // Merge consecutive same-role messages (Gemini rejects them)
-    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    const contents: Array<{ role: string; parts: any[] }> = [];
     for (const m of nonSystemMsgs) {
       const role = m.role === "assistant" ? "model" : "user";
+      const images = (m as LLMMessage).images;
+
+      // Build parts: images first (as inlineData), then text
+      const parts: any[] = [];
+      if (images && images.length > 0) {
+        for (const img of images) {
+          if (img.data) {
+            parts.push({ inlineData: { mimeType: img.mimeType || 'image/png', data: img.data } });
+          } else if (img.url) {
+            // Gemini supports fileData with fileUri for GCS, otherwise use URL as text hint
+            parts.push({ text: `[Image: ${img.url}]` });
+          }
+        }
+      }
+      parts.push({ text: m.content });
+
       const last = contents[contents.length - 1];
       if (last && last.role === role) {
-        last.parts[0]!.text += "\n\n" + m.content;
+        last.parts.push(...parts);
       } else {
-        contents.push({ role, parts: [{ text: m.content }] });
+        contents.push({ role, parts });
       }
     }
 
@@ -214,11 +247,27 @@ export async function callLLM(
     if (!process.env.OPENAI_API_KEY && process.env.NODE_ENV !== "test") throw new Error("OPENAI_API_KEY environment variable is required");
     headers["Authorization"] = `Bearer ${process.env.OPENAI_API_KEY || "test"}`;
     url = "https://api.openai.com/v1/chat/completions";
-    const cleanMessages = messages.map(m => ({ role: m.role, content: m.content }));
+    const openaiMessages = messages.map(m => {
+      const images = (m as LLMMessage).images;
+      if (images && images.length > 0) {
+        // Multimodal: content becomes array of parts
+        const contentParts: any[] = images.map(img => {
+          if (img.url) {
+            return { type: "image_url", image_url: { url: img.url } };
+          }
+          // Base64 to data URI
+          const mime = img.mimeType || 'image/png';
+          return { type: "image_url", image_url: { url: `data:${mime};base64,${img.data}` } };
+        });
+        contentParts.push({ type: "text", text: m.content });
+        return { role: m.role, content: contentParts };
+      }
+      return { role: m.role, content: m.content };
+    });
     if (llm.includes('o4-')) {
-      body = { model: llm, temperature: 1.0, messages: cleanMessages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+      body = { model: llm, temperature: 1.0, messages: openaiMessages, max_completion_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     } else {
-      body = { model: llm, temperature, messages: cleanMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
+      body = { model: llm, temperature, messages: openaiMessages, max_tokens: maxTokens, stream: !!streamingCallback, ...(streamingCallback && { stream_options: { include_usage: true } }) };
     }
     if (response_format) {
       body.response_format = response_format;
@@ -547,6 +596,93 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(result).toContain('42');
       expect(lastTokenUsage).not.toBeNull();
       expect(lastTokenUsage!.totalTokens).toBe(250);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Vision / Image Input Tests ──
+
+  test('OpenAI vision: images converted to image_url content parts', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'I see a cat' } }] }));
+    }) as any;
+    try {
+      await callLLM('gpt-4o', [
+        { role: 'user', content: 'What is in this image?', images: [{ url: 'https://example.com/cat.png' }] }
+      ]);
+      // content should be array (multimodal)
+      const userMsg = capturedBody.messages.find((m: any) => m.role === 'user');
+      expect(Array.isArray(userMsg.content)).toBe(true);
+      expect(userMsg.content[0].type).toBe('image_url');
+      expect(userMsg.content[0].image_url.url).toBe('https://example.com/cat.png');
+      expect(userMsg.content[1].type).toBe('text');
+      expect(userMsg.content[1].text).toBe('What is in this image?');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('OpenAI vision: base64 images use data URI format', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+    }) as any;
+    try {
+      await callLLM('gpt-4o-mini', [
+        { role: 'user', content: 'Describe', images: [{ data: 'iVBORw0KGgoAAAA==', mimeType: 'image/png' }] }
+      ]);
+      const userMsg = capturedBody.messages.find((m: any) => m.role === 'user');
+      expect(userMsg.content[0].image_url.url).toBe('data:image/png;base64,iVBORw0KGgoAAAA==');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Anthropic vision: images converted to image source blocks', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({
+        id: 'msg_1', type: 'message', role: 'assistant',
+        content: [{ type: 'text', text: 'A landscape' }],
+      }));
+    }) as any;
+    try {
+      await callLLM('claude-3-5-sonnet-20241022', [
+        { role: 'user', content: 'What is this?', images: [{ data: 'abc123', mimeType: 'image/jpeg' }] }
+      ]);
+      const userMsg = capturedBody.messages.find((m: any) => m.role === 'user');
+      expect(Array.isArray(userMsg.content)).toBe(true);
+      expect(userMsg.content[0].type).toBe('image');
+      expect(userMsg.content[0].source.type).toBe('base64');
+      expect(userMsg.content[0].source.media_type).toBe('image/jpeg');
+      expect(userMsg.content[0].source.data).toBe('abc123');
+      expect(userMsg.content[1].type).toBe('text');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('text-only messages still work with no images field', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'reply' } }] }));
+    }) as any;
+    try {
+      await callLLM('gpt-4o-mini', [{ role: 'user', content: 'Just text' }]);
+      const userMsg = capturedBody.messages.find((m: any) => m.role === 'user');
+      // Should be plain string, not array
+      expect(typeof userMsg.content).toBe('string');
+      expect(userMsg.content).toBe('Just text');
     } finally {
       globalThis.fetch = originalFetch;
     }

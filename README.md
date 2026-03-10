@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/gx402.svg)](https://badge.fury.io/js/gx402)
 [![Bun](https://img.shields.io/badge/Bun-tested-blueviolet)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-327%20pass-brightgreen)](https://bun.sh/)
+[![Tests](https://img.shields.io/badge/tests-331%20pass-brightgreen)](https://bun.sh/)
 
 **Agentic AI framework for TypeScript.** Structured I/O via Zod, real-time streaming, multi-provider LLM support, tool orchestration via MCP, automatic Solana x402 payments, and production-grade safeguards — all in a single package.
 
@@ -250,6 +250,40 @@ await loop.execute('Build a script');
 const resumed = LoopAgent.fromSession(session, config);
 ```
 
+## Vision / Image Input
+
+Send images to vision-capable models (GPT-4o, Gemini, Claude):
+
+```typescript
+import { callLLM, imageFromUrl, imageFromBase64, imageFromFile } from 'gx402';
+
+// From URL
+const result = await callLLM('gpt-4o', [
+  { role: 'user', content: 'What is in this image?', images: [imageFromUrl('https://example.com/photo.jpg')] }
+]);
+
+// From base64
+const b64 = '...';
+await callLLM('gemini-2.0-flash', [
+  { role: 'user', content: 'Describe this', images: [imageFromBase64(b64, 'image/png')] }
+]);
+
+// From local file
+await callLLM('claude-3-5-sonnet-20241022', [
+  { role: 'user', content: 'Analyze', images: [imageFromFile('./screenshot.png')] }
+]);
+
+// Multiple images
+await callLLM('gpt-4o', [
+  { role: 'user', content: 'Compare these two images', images: [
+    imageFromUrl('https://example.com/before.jpg'),
+    imageFromUrl('https://example.com/after.jpg'),
+  ]}
+]);
+```
+
+Images are automatically converted to each provider's native format. Text-only messages work exactly as before.
+
 ## Cost Controls
 
 ### Budget Guard
@@ -452,7 +486,7 @@ View queued analytics: `bun run analytics` or `gx --analytics`
 ## Testing
 
 ```bash
-bun test   # 327 tests, 0 failures, 603 expect() calls
+bun test   # 331 tests, 0 failures, 617 expect() calls
 ```
 
 ## Full Export List

@@ -24,10 +24,11 @@
 - [x] ~~**Response caching in callLLM**~~ — ✅ Already existed as `cachedCallLLM()` in `cache.ts`, exported from index. Added 5 inline tests: cache hit/miss, streaming bypass, TTL expiry, clearCache, different-input isolation. Total: 320 tests, 586 expect() calls.
 - [x] ~~**npm version bump + publish**~~ — ✅ DONE. Published gx402@2.1.0 to npm.
 - [x] ~~**LoopAgent checkpoint persistence**~~ — ✅ DONE. Added optional `session` field to LoopConfig. `LoopAgent.fromSession()` restores iteration state from SessionManager. `saveCheckpoint()` writes to both file and session (coexist). `removeCheckpoint()` clears session on success, sets `completedAt`. 4 new tests. Total: 327 tests, 603 expect() calls.
+- [x] ~~**Vision / image input**~~ — ✅ DONE. Messages now accept optional `images: ImageContent[]` for multimodal content. Per-provider conversion: OpenAI uses `image_url` content parts (URL or data URI), Anthropic uses `image` source blocks (base64 or URL), Gemini uses `inlineData` parts. DeepSeek strips images silently. Helper constructors: `imageFromUrl()`, `imageFromBase64()`, `imageFromFile()`. Backwards compatible — text-only messages unchanged. 4 new tests. Total: 331 tests, 617 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 327 tests across 14 files, 603 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 331 tests across 14 files, 617 expect() calls.

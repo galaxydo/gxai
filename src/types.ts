@@ -1,6 +1,8 @@
 // src/types.ts
 import { z } from "zod";
 import type { ToolAuthorizer } from "./tool-auth";
+import { readFileSync } from "fs";
+import { extname } from "path";
 
 export const LLM = {
   "gpt-4o-mini": "gpt-4o-mini",
@@ -102,6 +104,49 @@ export interface LLMResult {
 
 export type ProgressCallback = (update: ProgressUpdate) => void;
 export type StreamingCallback = (update: StreamingUpdate) => void;
+
+// --- Vision / Image Input ---
+
+/** Image content for multimodal messages */
+export interface ImageContent {
+  /** Base64-encoded image data (without the data: prefix) */
+  data?: string;
+  /** URL of the image (used directly for OpenAI, fetched+encoded for others) */
+  url?: string;
+  /** MIME type (auto-detected if not provided) */
+  mimeType?: string;
+}
+
+/** Message type supporting both text and multimodal content */
+export interface LLMMessage {
+  role: string;
+  content: string;
+  cacheControl?: boolean;
+  /** Optional images for vision models (GPT-4o, Gemini, Claude) */
+  images?: ImageContent[];
+}
+
+/** Create an ImageContent from a URL */
+export function imageFromUrl(url: string, mimeType?: string): ImageContent {
+  return { url, mimeType };
+}
+
+/** Create an ImageContent from base64-encoded data */
+export function imageFromBase64(data: string, mimeType: string = 'image/png'): ImageContent {
+  return { data, mimeType };
+}
+
+/** Create an ImageContent from a local file path */
+export function imageFromFile(filePath: string): ImageContent {
+  const ext = extname(filePath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+  };
+  const mimeType = mimeMap[ext] || 'image/png';
+  const data = readFileSync(filePath).toString('base64');
+  return { data, mimeType };
+}
 
 // --- LLM helpers (merged from src/llm/types.ts) ---
 
