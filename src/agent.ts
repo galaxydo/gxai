@@ -870,7 +870,8 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
     const isOpenAIFamily = this.config.llm.startsWith('gpt') || this.config.llm.startsWith('o4-');
     const isGeminiFamily = this.config.llm.startsWith('gemini');
-    const supportsJsonSchema = isOpenAIFamily || isGeminiFamily;
+    const isClaudeFamily = this.config.llm.includes('claude');
+    const supportsJsonSchema = isOpenAIFamily || isGeminiFamily || isClaudeFamily;
 
     const responseFormat = supportsJsonSchema ? {
       type: "json_schema",
