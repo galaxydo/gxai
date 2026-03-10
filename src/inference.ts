@@ -595,7 +595,7 @@ export interface FallbackConfig {
 export async function callLLMWithFallback(
   fallback: FallbackConfig,
   messages: Array<{ role: string; content: string; cacheControl?: boolean }>,
-  options: { temperature?: number; maxTokens?: number; response_format?: any } = {},
+  options: { temperature?: number; maxTokens?: number; response_format?: any; signal?: AbortSignal; timeoutMs?: number } = {},
   _measureFn?: any,
   streamingCallback?: StreamingCallback,
   progressCallback?: ProgressCallback,
@@ -1298,6 +1298,57 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(reasoningChunks).toEqual(['step by step...']);
       // The text content goes through the XML tag parser, verify via result string
       expect(result).toContain('The answer');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── callLLMWithFallback Tests ──
+
+  test('callLLMWithFallback: uses second provider when first fails', async () => {
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        // First provider fails with 401 (non-retryable — 500 would trigger retries)
+        return new Response('Unauthorized', { status: 401 });
+      }
+      // Second provider succeeds
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'fallback worked' } }] }));
+    }) as any;
+    try {
+      const onFallbackCalls: string[] = [];
+      const result = await callLLMWithFallback(
+        {
+          providers: ['gpt-4o', 'gpt-4o-mini'],
+          onFallback: (failed, _err, next) => onFallbackCalls.push(`${failed}->${next}`),
+        },
+        [{ role: 'user', content: 'hello' }],
+      );
+      expect(result).toBe('fallback worked');
+      expect(onFallbackCalls).toEqual(['gpt-4o->gpt-4o-mini']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('callLLMWithFallback: signal/timeoutMs options forwarded to callLLM', async () => {
+    const abortController = new AbortController();
+    const originalFetch = globalThis.fetch;
+    let capturedSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedSignal = opts.signal;
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+    }) as any;
+    try {
+      await callLLMWithFallback(
+        { providers: ['gpt-4o-mini'] },
+        [{ role: 'user', content: 'hello' }],
+        { signal: abortController.signal, timeoutMs: 5000 },
+      );
+      // The signal should have been composed (user signal + timeout) and passed to fetch
+      expect(capturedSignal).toBeDefined();
     } finally {
       globalThis.fetch = originalFetch;
     }

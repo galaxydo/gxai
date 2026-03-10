@@ -36,10 +36,16 @@
 - [x] ~~**Interactive chat REPL**~~ — ✅ DONE. `gx --chat` command: interactive terminal REPL with streaming responses, reasoning visibility (💭 _reasoning shown as dim gray), conversation memory across turns, `/model` switching, `/system` prompts, `/tokens` usage stats. Supports all providers via `--model` flag with shortcuts (gpt, claude, r1, gemini, etc.). Total: 346 tests, 664 expect() calls.
 - [x] ~~**Multi-model benchmark**~~ — ✅ DONE. `gx --bench` command: runs the same prompt across all providers with API keys in parallel. Ranked table output with 🏆 fastest, 💰 cheapest, per-model response time, token usage, cost, and truncated response. Shows 💭 reasoning from thinking models. Custom `--prompt` flag. Total: 346 tests, 664 expect() calls.
 - [x] ~~**Claude extended thinking**~~ — ✅ DONE. Claude Sonnet 4 and Opus models now auto-enable `thinking: { type: 'enabled', budget_tokens: 10000 }`. Response: thinking content blocks extracted to `lastTokenUsage.reasoningContent`. Streaming: thinking deltas emitted as `_reasoning` field. Completes reasoning support trifecta: DeepSeek R1 + Gemini 2.5 + Claude. 3 new tests. Total: 349 tests, 670 expect() calls.
+- [x] ~~**callLLMWithFallback signal/timeout**~~ — ✅ DONE. Options type now includes `signal` and `timeoutMs` matching `callLLM`. 2 new tests (fallback chain + signal forwarding). Total: 351 tests, 673 expect() calls.
+
+## 🟡 Priority: Improve (Backlog)
+- [ ] **Options-object API for callLLM** — Current signature has 7 positional params (llm, messages, options, _measureFn, streamingCallback, progressCallback, customFetch). Refactor to `callLLM(llm, messages, { ...options, streaming?, progress?, customFetch? })`. Breaking change for v3.
+- [ ] **Provider health check before routing** — Add `pingProvider(llm)` that HEAD-requests the provider's API endpoint. `callLLMWithFallback` could skip providers that are known-down instead of wasting time on failed requests.
+- [ ] **Streaming usage for Gemini** — Currently Gemini streaming only captures usage from the last SSE chunk's `usageMetadata`. Some Gemini models don't include it. Add fallback estimation from character count.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 349 tests across 14 files, 670 expect() calls.
+- **Testing**: Bun-native test runner (`bun test`), 351 tests across 14 files, 673 expect() calls.
