@@ -22,12 +22,12 @@
 ## 🟢 Priority: Backlog
 - [x] ~~**Wire SessionManager into Agent**~~ — ✅ DONE. Added optional `session` field to AgentConfig. Agent auto-restores ConversationMemory from session on first run, auto-saves memory + usage + lastRunAt after each successful run. Non-fatal error handling. 3 new tests. Total: 323 tests, 593 expect() calls.
 - [x] ~~**Response caching in callLLM**~~ — ✅ Already existed as `cachedCallLLM()` in `cache.ts`, exported from index. Added 5 inline tests: cache hit/miss, streaming bypass, TTL expiry, clearCache, different-input isolation. Total: 320 tests, 586 expect() calls.
-- [ ] **npm version bump + publish** — Current npm version is likely behind master. Review changes, bump to next minor/patch, publish.
-- [ ] **LoopAgent checkpoint persistence** — LoopAgent's checkpointing is in-memory only. Wire to SessionManager for resume-after-crash.
+- [x] ~~**npm version bump + publish**~~ — ✅ DONE. Published gx402@2.1.0 to npm.
+- [x] ~~**LoopAgent checkpoint persistence**~~ — ✅ DONE. Added optional `session` field to LoopConfig. `LoopAgent.fromSession()` restores iteration state from SessionManager. `saveCheckpoint()` writes to both file and session (coexist). `removeCheckpoint()` clears session on success, sets `completedAt`. 4 new tests. Total: 327 tests, 603 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
 - **Inference**: Uses provider-specific APIs with unified streaming output mapped via Zod.
 - **Multimodal**: Gemini capabilities (`generateImage`, `generateVideo`, `generateMusic`) integrated directly.
 - **Payments**: Auto-pays HTTP 402 responses via Solana (x402 protocol) if a wallet and MCP server are configured.
-- **Testing**: Bun-native test runner (`bun test`), 261+ tests across 8+ files.
+- **Testing**: Bun-native test runner (`bun test`), 327 tests across 14 files, 603 expect() calls.
