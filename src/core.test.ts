@@ -1999,3 +1999,97 @@ describe('Webhook Handler', () => {
         expect(events).toEqual(['push', 'deploy']);
     });
 });
+
+// ─── Agent + Session Persistence ────────────────────────
+
+describe('Agent Session Persistence', () => {
+    const { SessionManager } = require('./session') as typeof import('./session');
+    const { ConversationMemory: ConvMem } = require('./memory') as typeof import('./memory');
+
+    test('Agent accepts session in config', () => {
+        const agent = new Agent({
+            llm: 'gpt-4o-mini' as any,
+            inputFormat: z.object({ q: z.string() }),
+            outputFormat: z.object({ a: z.string() }),
+            memory: new ConvMem(),
+            session: new SessionManager({ storageKey: 'test-agent' }),
+        });
+        expect(agent).toBeDefined();
+    });
+
+    test('session restores memory on first run', async () => {
+        // Prepare a session with saved memory
+        const session = new SessionManager();
+        const savedMessages = [
+            { role: 'user' as const, content: 'previous question', timestamp: Date.now() - 60000 },
+            { role: 'assistant' as const, content: 'previous answer', timestamp: Date.now() - 59000 },
+        ];
+        session.set('memory', savedMessages);
+
+        // Set up globalThis.__sessionStore so load() works
+        (globalThis as any).__sessionStore = {};
+        session.save();
+
+        const memory = new ConvMem();
+        expect(memory.messageCount).toBe(0);
+
+        // Create agent with session — memory should be empty until first run
+        const agent = new Agent({
+            llm: 'gpt-4o-mini' as any,
+            inputFormat: z.object({ q: z.string() }),
+            outputFormat: z.object({ a: z.string() }),
+            memory,
+            session,
+        });
+
+        // Mock fetch for LLM call
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () =>
+            new Response(JSON.stringify({ choices: [{ message: { content: '<a>restored</a>' } }] }))
+        ) as any;
+
+        try {
+            await agent.run({ q: 'new question' });
+            // Memory should now contain: 2 restored + 1 new user + 1 new assistant = 4
+            expect(memory.messageCount).toBe(4);
+        } finally {
+            globalThis.fetch = originalFetch;
+            delete (globalThis as any).__sessionStore;
+        }
+    });
+
+    test('session saves memory after successful run', async () => {
+        (globalThis as any).__sessionStore = {};
+
+        const memory = new ConvMem();
+        const session = new SessionManager({ storageKey: 'save-test' });
+
+        const agent = new Agent({
+            llm: 'gpt-4o-mini' as any,
+            inputFormat: z.object({ q: z.string() }),
+            outputFormat: z.object({ a: z.string() }),
+            memory,
+            session,
+        });
+
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () =>
+            new Response(JSON.stringify({ choices: [{ message: { content: '<a>answer</a>' } }] }))
+        ) as any;
+
+        try {
+            await agent.run({ q: 'test' });
+
+            // Session should now have saved memory
+            expect(session.get('memory')).toBeDefined();
+            const savedMemory = session.get('memory');
+            expect(Array.isArray(savedMemory)).toBe(true);
+            expect(savedMemory.length).toBe(2); // user + assistant
+
+            expect(session.get('lastRunAt')).toBeGreaterThan(0);
+        } finally {
+            globalThis.fetch = originalFetch;
+            delete (globalThis as any).__sessionStore;
+        }
+    });
+});

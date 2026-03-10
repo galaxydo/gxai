@@ -54,6 +54,18 @@ export interface AgentConfig<I extends z.ZodObject<any>, O extends z.ZodObject<a
   maxDurationMs?: number;
   /** Optional conversation memory for multi-turn interactions */
   memory?: any;
+  /** Optional session manager for persisting memory + state across process restarts.
+   * When provided, Agent auto-restores memory on first run and auto-saves after each run.
+   * Use with memory for full multi-turn persistence:
+   * ```ts
+   * const agent = new Agent({
+   *   memory: new ConversationMemory(),
+   *   session: new SessionManager({ storageKey: 'my-agent' }),
+   *   ...
+   * });
+   * ```
+   */
+  session?: any;
   /** Response caching config — when set, identical inputs return cached LLM responses */
   cacheConfig?: { ttlMs?: number; maxEntries?: number };
   /** Output validation hooks — run on raw LLM output before schema parsing. Throw to reject. */

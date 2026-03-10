@@ -12,6 +12,7 @@ import { validateUrl } from './validation';
 import { calculateCost, estimateInputCost } from './pricing';
 import type { CostEstimate } from './pricing';
 import type { ConversationMemory } from './memory';
+import type { SessionManager } from './session';
 import { auditLog } from './audit';
 import { BudgetExceededError, ValidationError, TimeoutError } from './errors';
 import { ContextTracker } from './context';
@@ -59,6 +60,7 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
   private runEventCallback: RunEventCallback | null = null;
   private contextTracker: ContextTracker;
   private _plugins: Map<string, AgentPlugin> = new Map();
+  private _sessionRestored = false;
   /** Token usage from the most recent run() call */
   public lastUsage: TokenUsage | null = null;
   /** Cost from the most recent run() call (calculated from actual token usage) */
@@ -340,8 +342,21 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
 
       const validatedInput = this.config.inputFormat.parse(input);
 
-      // Record input in conversation memory
+      // Restore memory from session (first run only)
+      const session = this.config.session as SessionManager | undefined;
       const memory = this.config.memory as ConversationMemory | undefined;
+      if (session && memory && !this._sessionRestored) {
+        this._sessionRestored = true;
+        try {
+          session.load();
+          const savedMemory = session.get('memory');
+          if (savedMemory && Array.isArray(savedMemory)) {
+            memory.fromJSON(savedMemory);
+          }
+        } catch { /* session load failure is non-fatal */ }
+      }
+
+      // Record input in conversation memory
       if (memory) {
         memory.addUser(objToXml({ input: validatedInput }));
       }
@@ -515,6 +530,16 @@ export class Agent<I extends z.ZodObject<any>, O extends z.ZodObject<any>> {
       // Record output in conversation memory
       if (memory) {
         memory.addAssistant(objToXml({ output: result }));
+      }
+
+      // Persist memory to session
+      if (session && memory) {
+        try {
+          session.set('memory', memory.toJSON());
+          session.set('lastUsage', this.lastUsage);
+          session.set('lastRunAt', Date.now());
+          session.save();
+        } catch { /* session save failure is non-fatal */ }
       }
 
       this.emitEvent({ type: 'run_complete', agentName, llm: this.config.llm, requestId, durationMs: Date.now() - startTime, usage: this.lastUsage || undefined, cost: this.lastCost || undefined, timestamp: Date.now() });

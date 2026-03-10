@@ -21,7 +21,7 @@
 
 ## 🟢 Priority: Backlog
 - [ ] **Wire SessionManager into Agent** — Add optional `session` field to AgentConfig so Agent can automatically persist conversation history + outputs across runs. This would enable true multi-turn agentic workflows.
-- [ ] **Response caching in callLLM** — Add opt-in caching to `callLLM` using `ResponseCache` to avoid re-hitting APIs for identical prompts during development.
+- [x] ~~**Response caching in callLLM**~~ — ✅ Already existed as `cachedCallLLM()` in `cache.ts`, exported from index. Added 5 inline tests: cache hit/miss, streaming bypass, TTL expiry, clearCache, different-input isolation. Total: 320 tests, 586 expect() calls.
 
 ## 📝 Architecture Notes
 - **Core Abstractions**: `Agent` (single-shot/streaming) and `LoopAgent` (iterative tool-use).
