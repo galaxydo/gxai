@@ -37,7 +37,8 @@ const GeminiResponseSchema = z.object({
   candidates: z.array(z.object({
     content: z.object({
       parts: z.array(z.object({
-        text: z.string(),
+        text: z.string().optional(),
+        thought: z.boolean().optional(),
       })).min(1, 'Gemini candidate has no parts'),
     }),
   })).min(1, 'Gemini response has no candidates'),
@@ -62,7 +63,10 @@ function validateProviderResponse(llm: string, data: any): { content: string; ra
       return { content: textBlock?.text || '', rawData: data };
     } else if (llm.includes('gemini')) {
       const parsed = GeminiResponseSchema.parse(data);
-      return { content: parsed.candidates[0]!.content.parts[0]!.text, rawData: data };
+      // Skip thought parts — only return the model's final answer
+      const answerParts = parsed.candidates[0]!.content.parts.filter(p => !p.thought && p.text);
+      const content = answerParts.map(p => p.text).join('');
+      return { content: content || parsed.candidates[0]!.content.parts[0]!.text || '', rawData: data };
     } else {
       // OpenAI / DeepSeek
       const parsed = OpenAIResponseSchema.parse(data);
@@ -109,11 +113,18 @@ function extractUsage(llm: string, data: any): TokenUsage | undefined {
   }
   // Gemini format
   if (data?.usageMetadata?.promptTokenCount !== undefined) {
-    return {
+    const usage: TokenUsage = {
       inputTokens: data.usageMetadata.promptTokenCount,
       outputTokens: data.usageMetadata.candidatesTokenCount || 0,
       totalTokens: data.usageMetadata.totalTokenCount || (data.usageMetadata.promptTokenCount + (data.usageMetadata.candidatesTokenCount || 0)),
     };
+    // Gemini 2.5 thinking: extract thought parts from response
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (parts && Array.isArray(parts)) {
+      const thoughts = parts.filter((p: any) => p.thought && p.text).map((p: any) => p.text);
+      if (thoughts.length > 0) usage.reasoningContent = thoughts.join('\n');
+    }
+    return usage;
   }
   return undefined;
 }
@@ -268,6 +279,11 @@ export async function callLLM(
         generationConfig.responseSchema = response_format.json_schema.schema;
       }
 
+      // Gemini 2.5 thinking: include thought parts in response
+      if (llm.includes('gemini-2.5') || llm.includes('gemini-3')) {
+        generationConfig.thinkingConfig = { includeThoughts: true };
+      }
+
       body = {
         contents,
         generationConfig,
@@ -303,10 +319,17 @@ export async function callLLM(
             if (!jsonStr || jsonStr === "[DONE]") continue;
             try {
               const chunk = JSON.parse(jsonStr);
-              const text = chunk?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              if (text) {
-                fullResponse += text;
-                streamingCallback({ stage: "streaming", field: "content", value: text });
+              const parts = chunk?.candidates?.[0]?.content?.parts;
+              if (parts && Array.isArray(parts)) {
+                for (const part of parts) {
+                  if (part.thought && part.text) {
+                    // Gemini 2.5 thinking: emit as _reasoning
+                    streamingCallback({ stage: "streaming", field: "_reasoning", value: part.text });
+                  } else if (part.text) {
+                    fullResponse += part.text;
+                    streamingCallback({ stage: "streaming", field: "content", value: part.text });
+                  }
+                }
               }
               // Extract usage from last chunk
               if (chunk?.usageMetadata) {
@@ -1086,6 +1109,85 @@ if (import.meta.env.NODE_ENV === "test") {
       expect(reasoningChunks.length).toBe(2);
       expect(reasoningChunks[0]).toBe('Let me think...');
       expect(reasoningChunks[1]).toBe(' step 2');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // ── Gemini 2.5 Thinking Tests ──
+
+  test('Gemini 2.5: thinkingConfig included in request body', async () => {
+    let capturedBody: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'answer' }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }));
+    }) as any;
+    try {
+      await callLLM('gemini-2.5-pro-preview-05-06', [{ role: 'user', content: 'test' }]);
+      expect(capturedBody.generationConfig.thinkingConfig).toEqual({ includeThoughts: true });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini 2.5: thought parts extracted to reasoningContent, answer returned clean', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [
+              { text: 'I need to calculate 2+2. That equals 4.', thought: true },
+              { text: 'The answer is 4.' },
+            ]
+          }
+        }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 },
+      }))
+    ) as any;
+    try {
+      const result = await callLLM('gemini-2.5-flash-preview-05-20', [{ role: 'user', content: '2+2' }]);
+      expect(result).toBe('The answer is 4.');
+      expect(lastTokenUsage).not.toBeNull();
+      expect(lastTokenUsage!.reasoningContent).toBe('I need to calculate 2+2. That equals 4.');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('Gemini 2.5 streaming: thought parts emitted as _reasoning field', async () => {
+    const sseData = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"thinking...","thought":true}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"The answer"}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":" is 42"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3}}\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseData) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      }
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string) => new Response(stream)) as any;
+    try {
+      const reasoningChunks: string[] = [];
+      const contentChunks: string[] = [];
+      const result = await callLLM('gemini-2.5-pro-preview-05-06', [{ role: 'user', content: 'test' }], {},
+        undefined,
+        (update) => {
+          if (update.field === '_reasoning') reasoningChunks.push(update.value);
+          if (update.field === 'content') contentChunks.push(update.value);
+        }
+      );
+      expect(reasoningChunks).toEqual(['thinking...']);
+      expect(contentChunks).toEqual(['The answer', ' is 42']);
+      expect(result).toBe('The answer is 42');
     } finally {
       globalThis.fetch = originalFetch;
     }
