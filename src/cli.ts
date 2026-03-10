@@ -7,12 +7,14 @@ import { handleAnalytics } from "./commands/viewer";
 import { handleHealth } from "./commands/health";
 import { handleVersion } from "./commands/version";
 import { handleChat } from "./commands/chat";
+import { handleBench } from "./commands/bench";
 
 const HELP = `
 🧠 GXAI - AI Agent Framework (gx402)
 
 Usage:
   gx --chat              Interactive LLM chat REPL
+  gx --bench             Benchmark all configured models
   gx --serve             Start analytics dashboard
   gx --analytics         View local analytics queue
   gx --health            Run environment health check
@@ -22,6 +24,8 @@ Usage:
 Options:
   --chat                 Start interactive chat
   --model <name>         Model for chat (gpt, claude, r1, gemini, etc.)
+  --bench                Run multi-model benchmark
+  --prompt <text>        Custom prompt for benchmark
   --serve                Start the analytics web dashboard
   --port <number>        Port for web dashboard (default: 3002)
   --analytics            View local offline analytics
@@ -34,6 +38,8 @@ Examples:
   gx --chat
   gx --chat --model claude
   gx --chat --model r1
+  gx --bench
+  gx --bench --prompt "Write a haiku about Rust"
   gx --serve
   gx --health
 
@@ -46,6 +52,8 @@ async function main() {
     options: {
       chat: { type: 'boolean' },
       model: { type: 'string' },
+      bench: { type: 'boolean' },
+      prompt: { type: 'string' },
       serve: { type: 'boolean' },
       port: { type: 'string' },
       analytics: { type: 'boolean' },
@@ -74,6 +82,11 @@ async function main() {
 
   if (values.chat) {
     await handleChat(values.model);
+    return;
+  }
+
+  if (values.bench) {
+    await handleBench(values.prompt);
     return;
   }
 

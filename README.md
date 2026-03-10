@@ -58,6 +58,17 @@ npx gx402 --chat --model gemini   # Gemini 2.5 Flash (shows thinking 💭)
 
 In-session commands: `/model <name>`, `/models`, `/system <prompt>`, `/clear`, `/tokens`, `/quit`
 
+## Multi-Model Benchmark
+
+Compare all configured providers side-by-side:
+
+```bash
+npx gx402 --bench                                    # Default prompt
+npx gx402 --bench --prompt "Write a haiku about Rust" # Custom prompt
+```
+
+Output: ranked table with response time, token usage, cost, and truncated response. Highlights 🏆 fastest and 💰 cheapest. Shows 💭 reasoning from thinking models.
+
 ## Reasoning Models
 
 DeepSeek R1 and Gemini 2.5 chain-of-thought reasoning is exposed via a unified interface:
